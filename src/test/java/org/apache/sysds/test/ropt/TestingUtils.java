@@ -1,6 +1,6 @@
 package org.apache.sysds.test.ropt;
 
-import org.apache.sysds.api.ropt.CloudInstance;
+import org.apache.sysds.resource.enumeration.CloudInstance;
 import org.junit.Assert;
 
 import java.util.HashMap;

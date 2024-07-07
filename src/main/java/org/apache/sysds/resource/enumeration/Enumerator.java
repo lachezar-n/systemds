@@ -1,17 +1,18 @@
-package org.apache.sysds.api.ropt;
+package org.apache.sysds.resource.enumeration;
 
 import org.apache.spark.SparkConf;
 import org.apache.sysds.api.DMLScript;
 import org.apache.sysds.common.Types;
+import org.apache.sysds.hops.cost.CostEstimationWrapper;
+import org.apache.sysds.resource.cost.CostEstimationException;
+import org.apache.sysds.resource.cost.CostEstimator;
 import org.apache.sysds.runtime.controlprogram.Program;
-import org.apache.sysds.api.ropt.CloudUtils.InstanceType;
-import org.apache.sysds.api.ropt.CloudUtils.InstanceSize;
+import org.apache.sysds.resource.enumeration.CloudUtils.InstanceType;
+import org.apache.sysds.resource.enumeration.CloudUtils.InstanceSize;
 import org.apache.sysds.runtime.controlprogram.context.SparkExecutionContext;
 import org.apache.sysds.runtime.controlprogram.parfor.stat.InfrastructureAnalyzer;
 import org.jetbrains.annotations.NotNull;
 import scala.Tuple2;
-import scala.Tuple3;
-import scala.Tuple4;
 
 import java.util.*;
 
@@ -71,8 +72,16 @@ public abstract class Enumerator {
      */
     protected abstract SolutionPoint enumerate();
 
-    protected double[] getTimeEstimate(ConfigurationPoint point) {
-        // recompile by setting the Spark configs to the given point values
+    protected double[] getCostEstimate(ConfigurationPoint point) {
+        // get the estimated time cost
+        double timeCost;
+        try {
+            timeCost = CostEstimator.estimateExecutionTime(program);
+        } catch (CostEstimationException e) {
+            timeCost = Double.MAX_VALUE;
+        }
+        // calculate monetary cost
+
         // and then execute the cost estimator
         // estimate also the monastery cost
         return new double[] {0, 0}; // time cost, monetary cost

@@ -1,6 +1,6 @@
-package org.apache.sysds.api.ropt;
-import org.apache.sysds.api.ropt.CloudUtils.InstanceType;
-import org.apache.sysds.api.ropt.CloudUtils.InstanceSize;
+package org.apache.sysds.resource.enumeration;
+import org.apache.sysds.resource.enumeration.CloudUtils.InstanceType;
+import org.apache.sysds.resource.enumeration.CloudUtils.InstanceSize;
 
 import java.util.*;
 

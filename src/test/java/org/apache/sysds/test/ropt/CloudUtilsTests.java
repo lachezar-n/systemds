@@ -1,8 +1,7 @@
 package org.apache.sysds.test.ropt;
 
-import org.apache.sysds.api.ropt.AWSUtils;
-import org.apache.sysds.api.ropt.CloudInstance;
-import org.junit.Assert;
+import org.apache.sysds.resource.enumeration.AWSUtils;
+import org.apache.sysds.resource.enumeration.CloudInstance;
 import org.junit.Test;
 
 import java.io.File;

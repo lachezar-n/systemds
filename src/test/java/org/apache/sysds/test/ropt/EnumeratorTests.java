@@ -6,8 +6,8 @@ import java.util.LinkedList;
 import java.util.Map;
 import java.util.TreeMap;
 
-import org.apache.sysds.api.ropt.CloudInstance;
-import org.apache.sysds.api.ropt.Enumerator;
+import org.apache.sysds.resource.enumeration.CloudInstance;
+import org.apache.sysds.resource.enumeration.Enumerator;
 import org.junit.Assert;
 import org.junit.Test;
 

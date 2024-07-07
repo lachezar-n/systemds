@@ -1,4 +1,4 @@
-package org.apache.sysds.api.ropt;
+package org.apache.sysds.resource.enumeration;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -32,10 +32,11 @@ public abstract class CloudUtils {
     /**
      * This method calculates the cluster price based on the
      * estimated execution time and the cluster configuration.
+     * @param config the cluster configuration for the calculation
      * @param time estimated execution time in seconds
      * @return price for the given time
      */
-    public abstract double calculateClusterPrice(double time);
+    public abstract double calculateClusterPrice(Enumerator.ConfigurationPoint config, double time);
 
     public HashMap<String, CloudInstance> loadInstanceInfoTable(String instanceTablePath) throws IOException {
         HashMap<String, CloudInstance> result = new HashMap<>();

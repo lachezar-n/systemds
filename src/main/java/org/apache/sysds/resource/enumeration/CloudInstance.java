@@ -1,4 +1,4 @@
-package org.apache.sysds.api.ropt;
+package org.apache.sysds.resource.enumeration;
 
 import org.apache.sysds.runtime.controlprogram.context.SparkExecutionContext;
 

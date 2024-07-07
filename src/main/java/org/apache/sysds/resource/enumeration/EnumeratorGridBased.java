@@ -1,8 +1,4 @@
-package org.apache.sysds.api.ropt;
-
-import org.apache.sysds.runtime.controlprogram.parfor.stat.InfrastructureAnalyzer;
-import scala.Tuple3;
-import scala.Tuple4;
+package org.apache.sysds.resource.enumeration;
 
 import java.util.LinkedList;
 import java.util.Map;
@@ -31,12 +27,10 @@ public class EnumeratorGridBased extends Enumerator {
                         setExecutorConfigurations(eMemoryTuple._1, eMemoryTuple._2, eNode._1);
                         // TODO: recompile only Spark blocks
                         Enumerator.ConfigurationPoint newPoint = new ConfigurationPoint(dNode._2, eNode._2, eMemoryTuple._2);
-                        // TODO: time cost estimation
-                        double timeCost = 0.0;
-                        // TODO: estimate the monetary cost based on the estimated execution time (time cost)
-                        double monetaryCost = 0.0;
+                        // cost estimation
+                        double[] cost = getCostEstimate(newPoint);
                         // update optimal solution if better configuration point found
-                        updateOptimalSolution(optSolutionPoint, newPoint, timeCost, monetaryCost);
+                        updateOptimalSolution(optSolutionPoint, newPoint, cost[0], cost[1]);
                     }
                 }
             }

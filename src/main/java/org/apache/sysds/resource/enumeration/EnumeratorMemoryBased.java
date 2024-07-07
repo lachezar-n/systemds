@@ -1,4 +1,4 @@
-package org.apache.sysds.api.ropt;
+package org.apache.sysds.resource.enumeration;
 
 public class EnumeratorMemoryBased extends Enumerator {
     public EnumeratorMemoryBased(Builder builder) {
