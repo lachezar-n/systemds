@@ -367,7 +367,7 @@ public class CompressedMatrixBlock extends MatrixBlock {
 	}
 
 	@Override
-	public double quickGetValue(int r, int c) {
+	public double get(int r, int c) {
 		if(isOverlapping()) {
 			double v = 0.0;
 			for(AColGroup group : _colGroups)
@@ -645,23 +645,29 @@ public class CompressedMatrixBlock extends MatrixBlock {
 			return false;
 		}
 	}
+	
+	@Override
+	public boolean containsValue(double pattern, int k) {
+		//TODO parallel contains value
+		return containsValue(pattern);
+	}
 
 	@Override
 	public double max() {
 		AggregateUnaryOperator op = InstructionUtils.parseBasicAggregateUnaryOperator("uamax", 1);
-		return aggregateUnaryOperations(op, null, 1000, null).getValue(0, 0);
+		return aggregateUnaryOperations(op, null, 1000, null).get(0, 0);
 	}
 
 	@Override
 	public double min() {
 		AggregateUnaryOperator op = InstructionUtils.parseBasicAggregateUnaryOperator("uamin", 1);
-		return aggregateUnaryOperations(op, null, 1000, null).getValue(0, 0);
+		return aggregateUnaryOperations(op, null, 1000, null).get(0, 0);
 	}
 
 	@Override
 	public double sum() {
 		AggregateUnaryOperator op = InstructionUtils.parseBasicAggregateUnaryOperator("uak+", 1);
-		return aggregateUnaryOperations(op, null, 1000, null).getValue(0, 0);
+		return aggregateUnaryOperations(op, null, 1000, null).get(0, 0);
 	}
 
 	@Override
@@ -677,19 +683,19 @@ public class CompressedMatrixBlock extends MatrixBlock {
 	@Override
 	public double sumSq() {
 		AggregateUnaryOperator op = InstructionUtils.parseBasicAggregateUnaryOperator("uasqk+", 1);
-		return aggregateUnaryOperations(op, null, 1000, null).getValue(0, 0);
+		return aggregateUnaryOperations(op, null, 1000, null).get(0, 0);
 	}
 
 	@Override
 	public double prod() {
 		AggregateUnaryOperator op = InstructionUtils.parseBasicAggregateUnaryOperator("ua*", 1);
-		return aggregateUnaryOperations(op, null, 1000, null).getValue(0, 0);
+		return aggregateUnaryOperations(op, null, 1000, null).get(0, 0);
 	}
 
 	@Override
 	public double mean() {
 		AggregateUnaryOperator op = InstructionUtils.parseBasicAggregateUnaryOperator("uamean", 1);
-		return aggregateUnaryOperations(op, null, 1000, null).getValue(0, 0);
+		return aggregateUnaryOperations(op, null, 1000, null).get(0, 0);
 	}
 
 	@Override
@@ -1071,18 +1077,8 @@ public class CompressedMatrixBlock extends MatrixBlock {
 	}
 
 	@Override
-	public void quickSetValue(int r, int c, double v) {
+	public void set(int r, int c, double v) {
 		throw new DMLCompressionException("Should not set a value on a compressed Matrix");
-	}
-
-	@Override
-	public double quickGetValueThreadSafe(int r, int c) {
-		throw new DMLCompressionException("Thread safe execution does not work on Compressed Matrix");
-	}
-
-	@Override
-	public double getValueDenseUnsafe(int r, int c) {
-		throw new DMLCompressionException("Compressed Matrix does not have a dense matrix block");
 	}
 
 	@Override

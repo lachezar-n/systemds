@@ -157,7 +157,8 @@ public class ParameterizedBuiltinOp extends MultiThreadedHop {
 	@Override
 	public boolean isMultiThreadedOpType() {
 		return HopRewriteUtils.isValidOp(_op, 
-			ParamBuiltinOp.GROUPEDAGG, ParamBuiltinOp.REXPAND, ParamBuiltinOp.PARAMSERV);
+			ParamBuiltinOp.GROUPEDAGG, ParamBuiltinOp.REXPAND,
+			ParamBuiltinOp.PARAMSERV, ParamBuiltinOp.CONTAINS);
 	}
 	
 	@Override
@@ -203,6 +204,8 @@ public class ParameterizedBuiltinOp extends MultiThreadedHop {
 			case AUTODIFF:{
 				ParameterizedBuiltin pbilop = new ParameterizedBuiltin(
 					inputlops, _op, getDataType(), getValueType(), et);
+				if( isMultiThreadedOpType() )
+					pbilop.setNumThreads(OptimizerUtils.getConstrainedNumThreads(_maxNumThreads));
 				setOutputDimensions(pbilop);
 				setLineNumbers(pbilop);
 				setLops(pbilop);
@@ -723,7 +726,7 @@ public class ParameterizedBuiltinOp extends MultiThreadedHop {
 		}
 		super.computeMemEstimate(memo);
 	}
-	
+
 	@Override 
 	public boolean allowsAllExecTypes() {
 		return false;

@@ -30,7 +30,6 @@ import java.util.stream.Collectors;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.sysds.conf.ConfigurationManager;
-import org.apache.sysds.hops.FunctionOp;
 import org.apache.sysds.hops.Hop;
 import org.apache.sysds.hops.recompile.Recompiler;
 import org.apache.sysds.hops.rewrite.StatementBlockRewriteRule;
@@ -68,6 +67,7 @@ public class StatementBlock extends LiveVariableAnalysis implements ParseInfo
 	private HashMap<Lop.Type, List<Lop.Type>> _checkpointPositions = null;
 
 	protected double repetitions = 1;
+	private double loopDepRatio = 0; //ratio of loop dependent HOP dags
 	public final static double DEFAULT_LOOP_REPETITIONS = 10;
 
 	public StatementBlock() {
@@ -179,6 +179,15 @@ public class StatementBlock extends LiveVariableAnalysis implements ParseInfo
 	
 	public boolean isSplitDag() {
 		return _splitDag;
+	}
+
+	public double getLoopDepRatio() {
+		return loopDepRatio;
+	}
+
+	// maintain the ration of loop-dependent HOP dags in this block
+	public void setLoopDepRatio(double dep) {
+		loopDepRatio = dep;
 	}
 
 	private static boolean isMergeablePrintStatement(Statement stmt) {
@@ -1251,31 +1260,6 @@ public class StatementBlock extends LiveVariableAnalysis implements ParseInfo
 
 	public boolean hasHops(){
 		return getHops() != null && !getHops().isEmpty();
-	}
-
-	/**
-	 * Updates the repetition estimate for this statement block
-	 * and all contained hops. FunctionStatementBlocks are loaded
-	 * from the function dictionary and repetitions are estimated
-	 * for the contained statement blocks.
-	 *
-	 * This method is overridden in the subclasses of StatementBlock.
-	 * @param repetitions estimated for this statement block
-	 */
-	public void updateRepetitionEstimates(double repetitions){
-		this.repetitions = repetitions;
-		if ( hasHops() ){
-			for ( Hop root : getHops() ){
-				// Set repetitionNum for hops recursively
-				if(root instanceof FunctionOp) {
-					String funcName = ((FunctionOp) root).getFunctionName();
-					FunctionStatementBlock sbFuncBlock = getDMLProg().getBuiltinFunctionDictionary().getFunction(funcName);
-					sbFuncBlock.updateRepetitionEstimates(repetitions);
-				}
-				else
-					root.updateRepetitionEstimates(repetitions);
-			}
-		}
 	}
 
 	///////////////////////////////////////////////////////////////

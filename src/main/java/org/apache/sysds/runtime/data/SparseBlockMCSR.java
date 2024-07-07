@@ -19,6 +19,8 @@
 
 package org.apache.sysds.runtime.data;
 
+import java.util.Iterator;
+
 import org.apache.sysds.utils.MemoryEstimates;
 
 /**
@@ -124,11 +126,38 @@ public class SparseBlockMCSR extends SparseBlock
 		double size = 16; //object
 		size += MemoryEstimates.objectArrayCost(nrows); //references
 		long sparseRowSize = 16; // object
-		sparseRowSize += 4*4; // 3 integers + padding
+		sparseRowSize += 2*4; // 2 integers + padding
 		sparseRowSize += MemoryEstimates.intArrayCost(0);
 		sparseRowSize += MemoryEstimates.doubleArrayCost(0);
 		sparseRowSize += 12*Math.max(1, cnnz); //avoid bias by down cast for ultra-sparse
 		size += rlen * sparseRowSize; //sparse rows
+
+		// robustness for long overflows
+		return (long) Math.min(size, Long.MAX_VALUE);
+	}
+
+	/**
+	 * Computes the exact size in memory of the materialized block
+	 * @return the exact size in memory
+	 */
+	public long getExactSizeInMemory() {
+		double size = 16; //object
+		size += MemoryEstimates.objectArrayCost(_rows.length); //references
+
+		for (SparseRow sr : _rows) {
+			if (sr == null)
+				continue;
+			long sparseRowSize = 16; // object
+			if( sr instanceof SparseRowScalar )
+				sparseRowSize += 12;
+			else { //SparseRowVector
+				sparseRowSize += 2*4; // 2 integers
+				sparseRowSize += MemoryEstimates.intArrayCost(0);
+				sparseRowSize += MemoryEstimates.doubleArrayCost(0);
+				sparseRowSize += 12*((SparseRowVector)sr).capacity();
+			}
+			size += sparseRowSize; //sparse rows
+		}
 
 		// robustness for long overflows
 		return (long) Math.min(size, Long.MAX_VALUE);
@@ -349,12 +378,13 @@ public class SparseBlockMCSR extends SparseBlock
 	
 	@Override
 	public final void append(final int r, final int c, final double v) {
+		// Perf verified in java -jar target/systemds-3.3.0-SNAPSHOT-perf.jar 1004 1000 100000
 		if(v == 0)
 			return;
 		else if(_rows[r] == null)
-			_rows[r] = new SparseRowScalar().append(c, v);
-		else 
-			_rows[r] = _rows[r].append(c, v); 
+			_rows[r] = new SparseRowScalar(c, v);
+		else
+			_rows[r] = _rows[r].append(c, v);
 	}
 
 	@Override
@@ -458,6 +488,33 @@ public class SparseBlockMCSR extends SparseBlock
 		}
 		
 		return sb.toString();
+	}
+	
+	@Override
+	public Iterator<Integer> getNonEmptyRowsIterator(int rl, int ru) {
+		return new NonEmptyRowsIteratorMCSR(rl, ru);
+	}
+	
+	public class NonEmptyRowsIteratorMCSR implements Iterator<Integer> {
+		private int _rpos;
+		private final int _ru;
+		
+		public NonEmptyRowsIteratorMCSR(int rl, int ru) {
+			_rpos = rl;
+			_ru = ru;
+		}
+		
+		@Override
+		public boolean hasNext() {
+			while( _rpos<_ru && isEmpty(_rpos) )
+				_rpos++;
+			return _rpos < _ru;
+		}
+
+		@Override
+		public Integer next() {
+			return _rpos++;
+		}
 	}
 	
 	/**

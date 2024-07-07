@@ -170,25 +170,25 @@ public final class CLALibCompAgg {
 				MatrixBlock resWithCorrection = new MatrixBlock(ret.getNumRows(), ret.getNumColumns() + 1, false);
 				resWithCorrection.allocateDenseBlock();
 				for(int i = 0; i < ret.getNumRows(); i++)
-					resWithCorrection.setValue(i, 0, ret.quickGetValue(i, 0));
+					resWithCorrection.set(i, 0, ret.get(i, 0));
 				return resWithCorrection;
 			case LASTROW:
 				resWithCorrection = new MatrixBlock(ret.getNumRows() + 1, ret.getNumColumns(), false);
 				resWithCorrection.allocateDenseBlock();
 				for(int i = 0; i < ret.getNumColumns(); i++)
-					resWithCorrection.setValue(0, i, ret.quickGetValue(0, i));
+					resWithCorrection.set(0, i, ret.get(0, i));
 				return resWithCorrection;
 			case LASTTWOCOLUMNS:
 				resWithCorrection = new MatrixBlock(ret.getNumRows(), ret.getNumColumns() + 2, false);
 				resWithCorrection.allocateDenseBlock();
 				for(int i = 0; i < ret.getNumRows(); i++)
-					resWithCorrection.setValue(i, 0, ret.quickGetValue(i, 0));
+					resWithCorrection.set(i, 0, ret.get(i, 0));
 				return resWithCorrection;
 			case LASTTWOROWS:
 				resWithCorrection = new MatrixBlock(ret.getNumRows() + 2, ret.getNumColumns(), false);
 				resWithCorrection.allocateDenseBlock();
 				for(int i = 0; i < ret.getNumColumns(); i++)
-					resWithCorrection.setValue(0, i, ret.quickGetValue(0, i));
+					resWithCorrection.set(0, i, ret.get(0, i));
 				return resWithCorrection;
 			case NONE:
 				return ret;
@@ -203,13 +203,13 @@ public final class CLALibCompAgg {
 
 	private static MatrixBlock addCellCount(MatrixBlock ret, AggregateUnaryOperator op, int nRow, int nCol) {
 		if(op.indexFn instanceof ReduceAll)
-			ret.setValue(0, 1, (long) nRow * (long) nCol);
+			ret.set(0, 1, (long) nRow * (long) nCol);
 		else if(op.indexFn instanceof ReduceCol)
 			for(int i = 0; i < nRow; i++)
-				ret.setValue(i, 1, nCol);
+				ret.set(i, 1, nCol);
 		else // Reduce Row
 			for(int i = 0; i < nCol; i++)
-				ret.setValue(1, i, nRow);
+				ret.set(1, i, nRow);
 		return ret;
 	}
 
@@ -253,13 +253,13 @@ public final class CLALibCompAgg {
 		int k) {
 
 		final ExecutorService pool = CommonThreadPool.get(k);
-		final ArrayList<UnaryAggregateTask> tasks = new ArrayList<>();
-
-		final int r = m1.getNumRows();
-		final int c = m1.getNumColumns();
-		final List<AColGroup> colGroups = m1.getColGroups();
-
+		
 		try {
+			final ArrayList<UnaryAggregateTask> tasks = new ArrayList<>();
+	
+			final int r = m1.getNumRows();
+			final int c = m1.getNumColumns();
+			final List<AColGroup> colGroups = m1.getColGroups();
 			// compute all compressed column groups
 			if(op.indexFn instanceof ReduceCol) {
 				final int blkz = CompressionSettings.BITMAP_BLOCK_SZ;
@@ -277,10 +277,11 @@ public final class CLALibCompAgg {
 			reduceFutures(futures, ret, op, m1.isOverlapping());
 		}
 		catch(InterruptedException | ExecutionException e) {
-			pool.shutdown();
 			throw new DMLRuntimeException("Aggregate In parallel failed.", e);
 		}
-		pool.shutdown();
+		finally{
+			pool.shutdown();
+		}
 	}
 
 	private static double[][] getPreAgg(AggregateUnaryOperator opm, List<AColGroup> groups) {
@@ -296,38 +297,38 @@ public final class CLALibCompAgg {
 
 	private static void sumResults(MatrixBlock ret, List<Future<MatrixBlock>> futures)
 		throws InterruptedException, ExecutionException {
-		double val = ret.quickGetValue(0, 0);
+		double val = ret.get(0, 0);
 		for(Future<MatrixBlock> rtask : futures) {
-			double tmp = rtask.get().quickGetValue(0, 0);
+			double tmp = rtask.get().get(0, 0);
 			val += tmp;
 		}
-		ret.quickSetValue(0, 0, val);
+		ret.set(0, 0, val);
 
 	}
 
 	private static void productResults(MatrixBlock ret, List<Future<MatrixBlock>> futures)
 		throws InterruptedException, ExecutionException {
-		double val = ret.quickGetValue(0, 0);
+		double val = ret.get(0, 0);
 		for(Future<MatrixBlock> rtask : futures) {
-			double tmp = rtask.get().quickGetValue(0, 0);
+			double tmp = rtask.get().get(0, 0);
 			if(tmp == 0) {
-				ret.quickSetValue(0, 0, 0);
+				ret.set(0, 0, 0);
 				return;
 			}
 			val *= tmp;
 		}
-		ret.quickSetValue(0, 0, val);
+		ret.set(0, 0, val);
 
 	}
 
 	private static void aggregateResults(MatrixBlock ret, List<Future<MatrixBlock>> futures, AggregateUnaryOperator op)
 		throws InterruptedException, ExecutionException {
-		double val = ret.quickGetValue(0, 0);
+		double val = ret.get(0, 0);
 		for(Future<MatrixBlock> rtask : futures) {
-			double tmp = rtask.get().quickGetValue(0, 0);
+			double tmp = rtask.get().get(0, 0);
 			val = op.aggOp.increOp.fn.execute(val, tmp);
 		}
-		ret.quickSetValue(0, 0, val);
+		ret.set(0, 0, val);
 	}
 
 	private static void divideByNumberOfCellsForMean(CompressedMatrixBlock m1, MatrixBlock ret, IndexFunction idxFn) {
@@ -364,7 +365,7 @@ public final class CLALibCompAgg {
 	}
 
 	private static void divideByNumberOfCellsForMeanAll(CompressedMatrixBlock m1, MatrixBlock ret) {
-		ret.quickSetValue(0, 0, ret.quickGetValue(0, 0) / ((long) m1.getNumColumns() * (long) m1.getNumRows()));
+		ret.set(0, 0, ret.get(0, 0) / ((long) m1.getNumColumns() * (long) m1.getNumRows()));
 	}
 
 	private static void aggOverlapping(CompressedMatrixBlock m1, MatrixBlock ret, AggregateUnaryOperator op,
@@ -413,28 +414,33 @@ public final class CLALibCompAgg {
 		MatrixBlock ret, AggregateUnaryOperator op) throws InterruptedException {
 		final int k = op.getNumThreads();
 		final ExecutorService pool = CommonThreadPool.get(k);
-		final ArrayList<UAOverlappingTask> tasks = new ArrayList<>();
-		final int nCol = m1.getNumColumns();
-		final int nRow = m1.getNumRows();
-		final int blklen = Math.max(64, nRow / k);
-		final List<AColGroup> groups = m1.getColGroups();
-		final boolean shouldFilter = CLALibUtils.shouldPreFilter(groups);
-		if(shouldFilter) {
-			final double[] constV = new double[nCol];
-			final List<AColGroup> filteredGroups = CLALibUtils.filterGroups(groups, constV);
-			final AColGroup cRet = ColGroupConst.create(constV);
-			filteredGroups.add(cRet);
-			for(int i = 0; i < nRow; i += blklen)
-				tasks.add(new UAOverlappingTask(filteredGroups, ret, i, Math.min(i + blklen, nRow), op, nCol));
-		}
-		else {
-			for(int i = 0; i < nRow; i += blklen)
-				tasks.add(new UAOverlappingTask(groups, ret, i, Math.min(i + blklen, nRow), op, nCol));
-		}
+		try{
 
-		List<Future<MatrixBlock>> futures = pool.invokeAll(tasks);
-		pool.shutdown();
-		return futures;
+			final ArrayList<UAOverlappingTask> tasks = new ArrayList<>();
+			final int nCol = m1.getNumColumns();
+			final int nRow = m1.getNumRows();
+			final int blklen = Math.max(64, nRow / k);
+			final List<AColGroup> groups = m1.getColGroups();
+			final boolean shouldFilter = CLALibUtils.shouldPreFilter(groups);
+			if(shouldFilter) {
+				final double[] constV = new double[nCol];
+				final List<AColGroup> filteredGroups = CLALibUtils.filterGroups(groups, constV);
+				final AColGroup cRet = ColGroupConst.create(constV);
+				filteredGroups.add(cRet);
+				for(int i = 0; i < nRow; i += blklen)
+					tasks.add(new UAOverlappingTask(filteredGroups, ret, i, Math.min(i + blklen, nRow), op, nCol));
+			}
+			else {
+				for(int i = 0; i < nRow; i += blklen)
+					tasks.add(new UAOverlappingTask(groups, ret, i, Math.min(i + blklen, nRow), op, nCol));
+			}
+	
+			List<Future<MatrixBlock>> futures = pool.invokeAll(tasks);
+			return futures;
+		}
+		finally{
+			pool.shutdown();
+		}
 	}
 
 	private static List<List<AColGroup>> createTaskPartition(List<AColGroup> colGroups, int k) {
@@ -501,7 +507,7 @@ public final class CLALibCompAgg {
 			long nc = (long) in.getNumRows() * in.getNumColumns();
 			boolean containsZero = nnz != nc;
 			if(op.indexFn instanceof ReduceAll)
-				ret.setValue(0, 0, containsZero ? 0 : 1);
+				ret.set(0, 0, containsZero ? 0 : 1);
 			else
 				throw new NotImplementedException();
 		}

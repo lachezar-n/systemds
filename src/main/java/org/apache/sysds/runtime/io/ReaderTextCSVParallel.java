@@ -95,15 +95,15 @@ public class ReaderTextCSVParallel extends MatrixReader {
 		// allocate output matrix block
 		// First Read Pass (count rows/cols, determine offsets, allocate matrix block)
 		MatrixBlock ret = computeCSVSizeAndCreateOutputMatrixBlock(splits, path, rlen, clen, blen, estnnz);
-
+		
 		// Second Read Pass (read, parse strings, append to matrix block)
 		readCSVMatrixFromHDFS(splits, path, ret);
-
+		
 		// post-processing (representation-specific, change of sparse/dense block representation)
 		// - no sorting required for CSV because it is read in sorted order per row
 		// - nnz explicitly maintained in parallel for the individual splits
 		ret.examSparsity();
-
+		
 		// sanity check for parallel row count (since determined internally)
 		if(rlen >= 0 && rlen != ret.getNumRows())
 			throw new DMLRuntimeException("Read matrix inconsistent with given meta data: " + "expected nrow=" + rlen
@@ -146,14 +146,16 @@ public class ReaderTextCSVParallel extends MatrixReader {
 
 			// check return codes and aggregate nnz
 			long lnnz = 0;
-			for(Future<Long> rt : pool.invokeAll(tasks)) {
+			for(Future<Long> rt : pool.invokeAll(tasks))
 				lnnz += rt.get();
-			}
-			pool.shutdown();
+			
 			dest.setNonZeros(lnnz);
 		}
 		catch(Exception e) {
 			throw new IOException("Thread pool issue, while parallel read.", e);
+		}
+		finally{
+			pool.shutdown();
 		}
 	}
 
@@ -162,34 +164,39 @@ public class ReaderTextCSVParallel extends MatrixReader {
 		_rLen = 0;
 		_cLen = 0;
 
-		FileInputFormat.addInputPath(_job, path);
-		TextInputFormat informat = new TextInputFormat();
-		informat.configure(_job);
-
-		// count number of entities in the first non-header row
-		LongWritable key = new LongWritable();
-		Text oneLine = new Text();
-		RecordReader<LongWritable, Text> reader = informat.getRecordReader(splits[0], _job, Reporter.NULL);
-		try {
-			if(reader.next(key, oneLine)) {
-				String cellStr = oneLine.toString().trim();
-				_cLen = StringUtils.countMatches(cellStr, _props.getDelim()) + 1;
-			}
-		}
-		finally {
-			IOUtilFunctions.closeSilently(reader);
-		}
-
+		//overlap output allocation and count-row pass
+		ExecutorService pool = CommonThreadPool.get(_numThreads);
+		
 		// count rows in parallel per split
 		try {
-			ExecutorService pool = CommonThreadPool.get(_numThreads);
+			Future<MatrixBlock> ret = (rlen<0 || clen<0 || estnnz<0) ? null :
+				pool.submit(() -> createOutputMatrixBlock(rlen, clen, blen, estnnz, true, true));
+			
+			FileInputFormat.addInputPath(_job, path);
+			TextInputFormat informat = new TextInputFormat();
+			informat.configure(_job);
+			
+			// count number of entities in the first non-header row
+			LongWritable key = new LongWritable();
+			Text oneLine = new Text();
+			RecordReader<LongWritable, Text> reader = informat.getRecordReader(splits[0], _job, Reporter.NULL);
+			try {
+				if(reader.next(key, oneLine)) {
+					String cellStr = oneLine.toString().trim();
+					_cLen = StringUtils.countMatches(cellStr, _props.getDelim()) + 1;
+				}
+			}
+			finally {
+				IOUtilFunctions.closeSilently(reader);
+			}
+
 			ArrayList<CountRowsTask> tasks = new ArrayList<>();
 			boolean hasHeader = _props.hasHeader();
 			for(InputSplit split : splits) {
 				tasks.add(new CountRowsTask(split, informat, _job, hasHeader));
 				hasHeader = false;
 			}
-
+			
 			// collect row counts for offset computation
 			// early error notify in case not all tasks successful
 			_offsets = new SplitOffsetInfos(tasks.size());
@@ -201,32 +208,36 @@ public class ReaderTextCSVParallel extends MatrixReader {
 				_rLen = _rLen + lnrow;
 				i++;
 			}
-			pool.shutdown();
+		
+
+			// robustness for wrong dimensions which are already compiled into the plan
+			if((rlen != -1 && _rLen != rlen) || (clen != -1 && _cLen != clen)) {
+				String msg = "Read matrix dimensions differ from meta data: [" + _rLen + "x" + _cLen + "] vs. [" + rlen
+					+ "x" + clen + "].";
+				if(rlen < _rLen || clen < _cLen) {
+					// a) specified matrix dimensions too small
+					throw new DMLRuntimeException(msg);
+				}
+				else {
+					// b) specified matrix dimensions too large -> padding and warning
+					LOG.warn(msg);
+					_rLen = (int) rlen;
+					_cLen = (int) clen;
+				}
+			}
+
+			// allocate target matrix block based on given size;
+			// need to allocate sparse as well since lock-free insert into target
+			long estnnz2 = (estnnz < 0) ? (long) _rLen * _cLen : estnnz;
+			return (ret!=null) ? UtilFunctions.getSafe(ret) :
+				createOutputMatrixBlock(_rLen, _cLen, blen, estnnz2, true, true);
 		}
 		catch(Exception e) {
 			throw new IOException("Thread pool Error " + e.getMessage(), e);
 		}
-
-		// robustness for wrong dimensions which are already compiled into the plan
-		if((rlen != -1 && _rLen != rlen) || (clen != -1 && _cLen != clen)) {
-			String msg = "Read matrix dimensions differ from meta data: [" + _rLen + "x" + _cLen + "] vs. [" + rlen
-				+ "x" + clen + "].";
-			if(rlen < _rLen || clen < _cLen) {
-				// a) specified matrix dimensions too small
-				throw new DMLRuntimeException(msg);
-			}
-			else {
-				// b) specified matrix dimensions too large -> padding and warning
-				LOG.warn(msg);
-				_rLen = (int) rlen;
-				_cLen = (int) clen;
-			}
+		finally{
+			pool.shutdown();
 		}
-
-		// allocate target matrix block based on given size;
-		// need to allocate sparse as well since lock-free insert into target
-		long estnnz2 = (estnnz < 0) ? (long) _rLen * _cLen : estnnz;
-		return createOutputMatrixBlock(_rLen, _cLen, blen, estnnz2, true, true);
 	}
 
 	private static class SplitOffsetInfos {
@@ -340,11 +351,13 @@ public class ReaderTextCSVParallel extends MatrixReader {
 
 			while(reader.next(key, value)) { // foreach line
 				final String cellStr = value.toString().trim();
-				final String[] parts = IOUtilFunctions.split(cellStr, _props.getDelim());
 				double[] avals = a.values(_row);
 				int apos = a.pos(_row);
+				
+				final String[] parts = _cLen == 1 ? null :
+					IOUtilFunctions.split(cellStr, _props.getDelim());
 				for(int j = 0; j < _cLen; j++) { // foreach cell
-					String part = parts[j].trim();
+					String part = _cLen == 1 ? cellStr : parts[j].trim();
 					if(part.isEmpty()) {
 						noFillEmpty |= !_props.isFill();
 						cellValue = _props.getFillValue();
@@ -359,7 +372,7 @@ public class ReaderTextCSVParallel extends MatrixReader {
 				}
 				// sanity checks (number of columns, fill values)
 				IOUtilFunctions.checkAndRaiseErrorCSVEmptyField(cellStr, _props.isFill(), noFillEmpty);
-				IOUtilFunctions.checkAndRaiseErrorCSVNumColumns(_split.toString(), cellStr, parts, _cLen);
+				IOUtilFunctions.checkAndRaiseErrorCSVNumColumns(_split, cellStr, parts, _cLen);
 				_row++;
 			}
 
@@ -400,7 +413,7 @@ public class ReaderTextCSVParallel extends MatrixReader {
 				}
 				// sanity checks (number of columns, fill values)
 				IOUtilFunctions.checkAndRaiseErrorCSVEmptyField(cellStr, _props.isFill(), noFillEmpty);
-				IOUtilFunctions.checkAndRaiseErrorCSVNumColumns(_split.toString(), cellStr, parts, _cLen);
+				IOUtilFunctions.checkAndRaiseErrorCSVNumColumns(_split, cellStr, parts, _cLen);
 				_row++;
 			}
 			return nnz;
@@ -445,7 +458,7 @@ public class ReaderTextCSVParallel extends MatrixReader {
 
 				// sanity checks (number of columns, fill values)
 				IOUtilFunctions.checkAndRaiseErrorCSVEmptyField(cellStr, _props.isFill(), noFillEmpty);
-				IOUtilFunctions.checkAndRaiseErrorCSVNumColumns(_split.toString(), cellStr, parts, _cLen);
+				IOUtilFunctions.checkAndRaiseErrorCSVNumColumns(_split, cellStr, parts, _cLen);
 
 				_row++;
 			}
@@ -488,7 +501,7 @@ public class ReaderTextCSVParallel extends MatrixReader {
 
 				// sanity checks (number of columns, fill values)
 				IOUtilFunctions.checkAndRaiseErrorCSVEmptyField(cellStr, _props.isFill(), noFillEmpty);
-				IOUtilFunctions.checkAndRaiseErrorCSVNumColumns(_split.toString(), cellStr, parts, _cLen);
+				IOUtilFunctions.checkAndRaiseErrorCSVNumColumns(_split, cellStr, parts, _cLen);
 
 				_row++;
 			}
@@ -523,7 +536,7 @@ public class ReaderTextCSVParallel extends MatrixReader {
 					_col++;
 				}
 
-				IOUtilFunctions.checkAndRaiseErrorCSVNumColumns(_split.toString(), cellStr, parts, _cLen);
+				IOUtilFunctions.checkAndRaiseErrorCSVNumColumns(_split, cellStr, parts, _cLen);
 
 				_row++;
 			}

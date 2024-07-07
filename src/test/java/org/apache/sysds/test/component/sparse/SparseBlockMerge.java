@@ -21,6 +21,7 @@ package org.apache.sysds.test.component.sparse;
 
 import org.junit.Assert;
 import org.junit.Test;
+
 import org.apache.sysds.runtime.data.SparseBlock;
 import org.apache.sysds.runtime.data.SparseBlockFactory;
 import org.apache.sysds.runtime.matrix.data.MatrixBlock;
@@ -361,6 +362,7 @@ public class SparseBlockMerge extends AutomatedTestBase
 	public void testMergeDCSR_COO_3()  {
 		runSparseBlockMergeTest(SparseBlock.Type.DCSR, SparseBlock.Type.COO, sparsity3);
 	}
+
 	
 	private void runSparseBlockMergeTest( SparseBlock.Type btype1, SparseBlock.Type btype2, double sparsity)
 	{
@@ -406,8 +408,11 @@ public class SparseBlockMerge extends AutomatedTestBase
 					int[] aix = sblock.indexes(i);
 					double[] avals = sblock.values(i);
 					for( int j=0; j<alen; j++ ) {
-						if( avals[apos+j] != A[i][aix[apos+j]] )
-							Assert.fail("Wrong value returned by scan: "+avals[apos+j]+", expected: "+A[i][apos+aix[j]]);
+						if( avals[apos+j] != A[i][aix[apos+j]] ) {
+							System.out.println("Issue at row "+i);
+							Assert.fail("Wrong value returned by scan: "
+								+ avals[apos+j] +", expected: "+ A[i][aix[apos+j]]);
+						}
 						count++;
 					}
 				}

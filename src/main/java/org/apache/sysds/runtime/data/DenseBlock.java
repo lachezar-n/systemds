@@ -67,6 +67,8 @@ public abstract class DenseBlock implements Serializable, Block
 
 	/**
 	 * Get the ith dimensions size of the dense block.
+	 * 
+	 * 0 is rows , 1 is cols, etc.
 	 *
 	 * @param i the number of dimension to get
 	 * @return the size of the dimension
@@ -414,7 +416,14 @@ public abstract class DenseBlock implements Serializable, Block
 	 * @param toIndex   ending index in block (exclusive)
 	 * @param v         value
 	 */
-	protected abstract void fillBlock(int bix, int fromIndex, int toIndex, double v);
+	public abstract void fillBlock(int bix, int fromIndex, int toIndex, double v);
+
+	/**
+	 * Fill the DenseBlock row index with the value specified.
+	 * @param r The row to fill
+	 * @param v The value to fill it with.
+	 */
+	public abstract void fillRow(int r, double v);
 
 	/**
 	 * Set a value at a position given by block index and index in that block.
@@ -665,15 +674,46 @@ public abstract class DenseBlock implements Serializable, Block
 	 * (note that NaN==NaN yields false).
 	 * 
 	 * @param pattern checked pattern
+	 * @param rl row lower bound (inclusive)
+	 * @param ru row upper bound (exclusive)
 	 * @return true if pattern appears at least once, otherwise false
 	 */
-	public boolean contains(double pattern) {
+
+	public boolean contains(double pattern, int rl, int ru) {
 		boolean NaNpattern = Double.isNaN(pattern);
-		for(int i=0; i<numBlocks(); i++) {
+		int clen = _odims[0];
+		for(int i=rl; i<ru; i++) {
+			double[] vals = values(i);
+			int pos = pos(i);
+			for(int j=pos; j<pos+clen; j++){
+				if(vals[j]==pattern || (NaNpattern && Double.isNaN(vals[j])))
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public boolean contains(double pattern) {
+		if(Double.isNaN(pattern))
+			return containsNan();
+
+		for(int i = 0; i < numBlocks(); i++) {
 			double[] vals = valuesAt(i);
 			int len = size(i);
-			for(int j=0; j<len; j++)
-				if(vals[j]==pattern || (NaNpattern && Double.isNaN(vals[j])))
+			for(int j = 0; j < len; j++)
+				if(vals[j] == pattern)
+					return true;
+		}
+		return false;
+	}
+
+	private boolean containsNan() {
+		for(int i = 0; i < numBlocks(); i++) {
+			final double[] vals = valuesAt(i);
+			final int len = size(i);
+			for(int j = 0; j < len; j++)
+				// nan Check is v != v
+				if(vals[j] != vals[j])
 					return true;
 		}
 		return false;

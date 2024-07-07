@@ -99,10 +99,17 @@ public interface Util {
 	public static MatrixBlock extractValues(double[] v, IColIndex colIndexes) {
 		MatrixBlock rowVector = new MatrixBlock(1, colIndexes.size(), false);
 		for(int i = 0; i < colIndexes.size(); i++)
-			rowVector.quickSetValue(0, i, v[colIndexes.get(i)]);
+			rowVector.set(0, i, v[colIndexes.get(i)]);
 		return rowVector;
 	}
 
+	/**
+	 * Nan Enabled equals operator returns true on Nan == Nan.
+	 * 
+	 * @param a value 1
+	 * @param b value 2
+	 * @return if they are equal on the bit level.
+	 */
 	public static boolean eq(double a, double b) {
 		long al = Double.doubleToRawLongBits(a);
 		long bl = Double.doubleToRawLongBits(b);

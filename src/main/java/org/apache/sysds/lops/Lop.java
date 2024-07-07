@@ -30,8 +30,6 @@ import org.apache.sysds.common.Types.ExecType;
 import org.apache.sysds.hops.OptimizerUtils;
 import org.apache.sysds.lops.compile.Dag;
 import org.apache.sysds.runtime.instructions.fed.FEDInstruction.FederatedOutput;
-import org.apache.sysds.runtime.privacy.PrivacyConstraint;
-
 
 /**
  * Base class for all Lops.
@@ -115,11 +113,6 @@ public abstract class Lop
 	protected ArrayList<Lop> outputs;
 
 	/**
-	 * Privacy Constraint
-	 */
-	protected PrivacyConstraint privacyConstraint;
-
-	/**
 	 * Field defining if prefetch should be activated for operation.
 	 * When prefetch is activated, the output will be transferred from
 	 * remote federated sites to local before one of the subsequent
@@ -156,6 +149,12 @@ public abstract class Lop
 	 * Examples include spark unary aggregate, mapmm, prefetch
 	 */
 	protected boolean _asynchronous = false;
+
+	/**
+	 * Refers to the pipeline to which this lop belongs to.
+	 * This is used for identifying parallel execution of lops.
+	 */
+	protected int _pipelineID = -1;
 
 	/**
 	 * Estimated size for the output produced by this Lop in bytes.
@@ -372,18 +371,6 @@ public abstract class Lop
 		outputs.remove(op);
 	}
 
-	/**
-	 * Method to set privacy constraint of Lop.
-	 * @param privacy privacy constraint instance
-	 */
-	public void setPrivacyConstraint(PrivacyConstraint privacy){
-		privacyConstraint = privacy;
-	}
-
-	public PrivacyConstraint getPrivacyConstraint(){
-		return privacyConstraint;
-	}
-
 	public void activatePrefetch(){
 		activatePrefetch = true;
 	}
@@ -416,6 +403,14 @@ public abstract class Lop
 
 	public boolean isAsynchronousOp() {
 		return _asynchronous;
+	}
+
+	public void setPipelineID(int id) {
+		_pipelineID = id;
+	}
+
+	public int getPipelineID() {
+		return _pipelineID;
 	}
 
 	public void setMemoryEstimates(double outMem, double totMem, double interMem, double bcMem) {

@@ -356,15 +356,17 @@ public class MultiColumnEncoder implements Encoder {
 		boolean hasDC = false;
 		boolean hasWE = false;
 		int distinctWE = 0;
+		int sizeWE = 0;
 		for(ColumnEncoderComposite columnEncoder : _columnEncoders) {
 			hasDC |= columnEncoder.hasEncoder(ColumnEncoderDummycode.class);
 			for (ColumnEncoder enc : columnEncoder.getEncoders())
 				if(enc instanceof ColumnEncoderWordEmbedding){
 					hasWE = true;
 					distinctWE = ((ColumnEncoderWordEmbedding) enc).getNrDistinctEmbeddings();
+					sizeWE = ((ColumnEncoderWordEmbedding) enc).getDomainSize();
 				}
 		}
-		outputMatrixPreProcessing(out, in, hasDC, hasWE, distinctWE);
+		outputMatrixPreProcessing(out, in, hasDC, hasWE, distinctWE, sizeWE);
 		if(k > 1) {
 			if(!_partitionDone) //happens if this method is directly called
 				deriveNumRowPartitions(in, k);
@@ -516,9 +518,9 @@ public class MultiColumnEncoder implements Encoder {
 		int[] sampleInds = ComEstSample.getSortedSample(in.getNumRows(), sampleSize, seed, 1);
 
 		// Concurrent (column-wise) recode map size estimation
-		ExecutorService myPool = CommonThreadPool.get(k);
+		ExecutorService pool = CommonThreadPool.get(k);
 		try {
-			myPool.submit(() -> {
+			pool.submit(() -> {
 				rcList.stream().parallel().forEach(e -> {
 					e.computeRCDMapSizeEstimate(in, sampleInds);
 				});
@@ -526,6 +528,9 @@ public class MultiColumnEncoder implements Encoder {
 		}
 		catch(Exception ex) {
 			throw new DMLRuntimeException(ex);
+		}
+		finally{
+			pool.shutdown();
 		}
 
 		if(DMLScript.STATISTICS) {
@@ -553,7 +558,7 @@ public class MultiColumnEncoder implements Encoder {
 		return totMemOverhead;
 	}
 
-	private static void outputMatrixPreProcessing(MatrixBlock output, CacheBlock<?> input, boolean hasDC, boolean hasWE, int distinctWE) {
+	private static void outputMatrixPreProcessing(MatrixBlock output, CacheBlock<?> input, boolean hasDC, boolean hasWE, int distinctWE, int sizeWE) {
 		long t0 = DMLScript.STATISTICS ? System.nanoTime() : 0;
 		if(output.isInSparseFormat()) {
 			if (MatrixBlock.DEFAULT_SPARSEBLOCK != SparseBlock.Type.CSR
@@ -601,8 +606,11 @@ public class MultiColumnEncoder implements Encoder {
 		else {
 			// Allocate dense block and set nnz to total #entries
 			output.allocateDenseBlock(true, hasWE);
-			if( hasWE)
-				((DenseBlockFP64DEDUP) output.getDenseBlock()).setDistinct(distinctWE);
+			if( hasWE){
+				DenseBlockFP64DEDUP dedup = ((DenseBlockFP64DEDUP) output.getDenseBlock());
+				dedup.setDistinct(distinctWE);
+				dedup.setEmbeddingSize(sizeWE);
+			}
 			//output.setAllNonZeros();
 		}
 
@@ -648,10 +656,10 @@ public class MultiColumnEncoder implements Encoder {
 
 
 	private void outputMatrixPostProcessingParallel(MatrixBlock output, int k) {
-		ExecutorService myPool = CommonThreadPool.get(k);
+		ExecutorService pool = CommonThreadPool.get(k);
 		try {
 			// Collect the row indices that need compaction
-			Set<Integer> indexSet = myPool.submit(() -> _columnEncoders.stream().parallel()
+			Set<Integer> indexSet = pool.submit(() -> _columnEncoders.stream().parallel()
 				.map(ColumnEncoderComposite::getSparseRowsWZeros).flatMap(l -> {
 					if(l == null)
 						return null;
@@ -659,11 +667,11 @@ public class MultiColumnEncoder implements Encoder {
 				}).collect(Collectors.toSet())).get();
 
 			// Check if the set is empty
-			boolean emptySet = myPool.submit(() -> indexSet.stream().parallel().allMatch(Objects::isNull)).get();
+			boolean emptySet = pool.submit(() -> indexSet.stream().parallel().allMatch(Objects::isNull)).get();
 
 			// Concurrently compact the rows
 			if(emptySet) {
-				myPool.submit(() -> {
+				pool.submit(() -> {
 					indexSet.stream().parallel().forEach(row -> {
 						output.getSparseBlock().get(row).compact();
 					});
@@ -674,7 +682,7 @@ public class MultiColumnEncoder implements Encoder {
 			throw new DMLRuntimeException(ex);
 		}
 		finally {
-			myPool.shutdown();
+			pool.shutdown();
 		}
 
 		output.recomputeNonZeros();
@@ -781,9 +789,9 @@ public class MultiColumnEncoder implements Encoder {
 			else {
 				ni++;
 			}
-			out.quickSetValue(i, 0, colID);
-			out.quickSetValue(i, 1, nColID);
-			out.quickSetValue(i, 2, ni);
+			out.set(i, 0, colID);
+			out.set(i, 1, nColID);
+			out.set(i, 2, ni);
 		}
 		return out;
 	}
@@ -1159,17 +1167,19 @@ public class MultiColumnEncoder implements Encoder {
 			boolean hasUDF = _encoder.getColumnEncoders().stream().anyMatch(e -> e.hasEncoder(ColumnEncoderUDF.class));
 			boolean hasWE = false;
 			int distinctWE = 0;
+			int sizeWE = 0;
 			for (ColumnEncoder enc : _encoder.getEncoders())
 				if(enc instanceof ColumnEncoderWordEmbedding){
 					hasWE = true;
 					distinctWE = ((ColumnEncoderWordEmbedding) enc).getNrDistinctEmbeddings();
+					sizeWE = ((ColumnEncoderWordEmbedding) enc).getDomainSize();
 				}
 			int numCols = _encoder.getNumOutCols();
 			boolean hasDC = _encoder.getColumnEncoders(ColumnEncoderDummycode.class).size() > 0;
 			long estNNz = (long) _input.getNumRows() * (hasUDF ? numCols : _input.getNumColumns());
 			boolean sparse = MatrixBlock.evalSparseFormatInMemory(_input.getNumRows(), numCols, estNNz) && !hasUDF;
 			_output.reset(_input.getNumRows(), numCols, sparse, estNNz);
-			outputMatrixPreProcessing(_output, _input, hasDC, hasWE, distinctWE);
+			outputMatrixPreProcessing(_output, _input, hasDC, hasWE, distinctWE,sizeWE);
 			return null;
 		}
 

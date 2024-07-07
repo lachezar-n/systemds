@@ -105,8 +105,15 @@ public class DenseBlockLInt64 extends DenseBlockLDRB
 	}
 
 	@Override
-	protected void fillBlock(int bix, int fromIndex, int toIndex, double v) {
+	public void fillBlock(int bix, int fromIndex, int toIndex, double v) {
 		Arrays.fill(_blocks[bix], fromIndex, toIndex, UtilFunctions.toLong(v));
+	}
+
+	@Override 
+	public void fillRow(int r, double v){
+		int start = pos(r);
+		int end = start + getDim(1);
+		Arrays.fill(_blocks[index(r)], start, end, UtilFunctions.toLong(v));
 	}
 
 	@Override

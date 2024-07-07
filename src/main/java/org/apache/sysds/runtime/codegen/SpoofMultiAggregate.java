@@ -119,8 +119,8 @@ public abstract class SpoofMultiAggregate extends SpoofOperator
 		}
 		else  //MULTI-THREADED
 		{
+			ExecutorService pool = CommonThreadPool.get(k);
 			try {
-				ExecutorService pool = CommonThreadPool.get(k);
 				ArrayList<ParAggTask> tasks = new ArrayList<>();
 				int nk = UtilFunctions.roundToNext(Math.min(8*k,m/32), k);
 				int blklen = (int)(Math.ceil((double)m/nk));
@@ -129,7 +129,6 @@ public abstract class SpoofMultiAggregate extends SpoofOperator
 						m, n, sparseSafe, i*blklen, Math.min((i+1)*blklen, m))); 
 				//execute tasks
 				List<Future<double[]>> taskret = pool.invokeAll(tasks);	
-				pool.shutdown();
 			
 				//aggregate partial results
 				ArrayList<double[]> pret = new ArrayList<>();
@@ -139,6 +138,9 @@ public abstract class SpoofMultiAggregate extends SpoofOperator
 			}
 			catch(Exception ex) {
 				throw new DMLRuntimeException(ex);
+			}
+			finally{
+				pool.shutdown();
 			}
 		}
 	
@@ -252,15 +254,15 @@ public abstract class SpoofMultiAggregate extends SpoofOperator
 		
 		for( int k=0; k< aggOps.length; k++ ) {
 			if( vfun[k] instanceof KahanFunction ) {
-				KahanObject kbuff = new KahanObject(c.quickGetValue(0, k), 0);
+				KahanObject kbuff = new KahanObject(c.get(0, k), 0);
 				KahanPlus kplus = KahanPlus.getKahanPlusFnObject();
-				kplus.execute2(kbuff, b.quickGetValue(0, k));
-				c.quickSetValue(0, k, kbuff._sum);
+				kplus.execute2(kbuff, b.get(0, k));
+				c.set(0, k, kbuff._sum);
 			}
 			else {
-				double cval = c.quickGetValue(0, k);
-				double bval = b.quickGetValue(0, k);
-				c.quickSetValue(0, k, vfun[k].execute(cval, bval));
+				double cval = c.get(0, k);
+				double bval = b.get(0, k);
+				c.set(0, k, vfun[k].execute(cval, bval));
 			}
 		}
 	}

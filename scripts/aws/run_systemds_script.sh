@@ -58,3 +58,4 @@ aws emr wait step-complete --cluster-id $CLUSTER_ID --step-id $STEP_ID --region 
 
 aws emr ssh --cluster-id $CLUSTER_ID --key-pair-file ${KEYPAIR_NAME}.pem --region $REGION --command "cat /mnt/var/log/hadoop/steps/$STEP_ID/stderr"
 aws emr ssh --cluster-id $CLUSTER_ID --key-pair-file ${KEYPAIR_NAME}.pem --region $REGION --command "cat /mnt/var/log/hadoop/steps/$STEP_ID/stdout"
+

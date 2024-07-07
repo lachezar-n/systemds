@@ -33,6 +33,8 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -247,6 +249,17 @@ public class UtilFunctions {
 		return pos;
 	}
 
+	public static List<Pair<Integer,Integer>> getTaskRangesDefault(int len, int k) {
+		List<Pair<Integer,Integer>> ret = new ArrayList<>();
+		int nk = roundToNext(Math.min(8*k,len/32), k);
+		int beg = 0;
+		for(Integer blen : getBalancedBlockSizes(len, nk)) {
+			ret.add(new Pair<>(beg, beg+blen)); 
+			beg = beg+blen;
+		}
+		return ret;
+	}
+	
 	public static ArrayList<Integer> getBalancedBlockSizesDefault(int len, int k, boolean constK) {
 		int nk = constK ? k : roundToNext(Math.min(8*k,len/32), k);
 		return getBalancedBlockSizes(len, nk);
@@ -432,7 +445,7 @@ public class UtilFunctions {
 	 * 
 	 * @param low   lower bound (inclusive)
 	 * @param up    upper bound (inclusive)
-	 * @param incr  increment 
+	 * @param incr  increment
 	 * @return list of integers
 	 */
 	public static List<Integer> getSeqList(int low, int up, int incr) {
@@ -447,7 +460,7 @@ public class UtilFunctions {
 	 * 
 	 * @param low   lower bound (inclusive)
 	 * @param up    upper bound (inclusive)
-	 * @param incr  increment 
+	 * @param incr  increment
 	 * @return array of integers
 	 */
 	public static int[] getSeqArray(int low, int up, int incr) {
@@ -765,7 +778,7 @@ public class UtilFunctions {
 		byte ret = Byte.MIN_VALUE;
 		for( int i=0; i<array.length; i++ )
 			ret = (array[i]>ret)?array[i]:ret;
-		return ret;	
+		return ret;
 	}
 	
 	public static String unquote(String s) {
@@ -1327,6 +1340,14 @@ public class UtilFunctions {
 			result[i] = String.valueOf(original[i]);
 		return result;
 	}
+	
+	public static <T> T getSafe(Future<T> task) {
+		try {
+			return task.get();
+		} catch (InterruptedException | ExecutionException e) {
+			throw new DMLRuntimeException(e);
+		}
+	}
 
 	public static double[] convertStringToDoubleArray(String[] original) {
 //		double[] ret = new double[original.length];
@@ -1341,5 +1362,65 @@ public class UtilFunctions {
 //		return ret;
 
 		return Arrays.stream(original).mapToDouble(Double::parseDouble).toArray();
+	}
+	
+	/**
+	 * Computes the word error rate (Levenshtein distance at word level):
+	 * wer =  (numSubst + numDel + numIns) / length(r)
+	 * 
+	 * This code has been adapted from Apache Commons Lang 3.12 
+	 * (getLevenshteinDistance, but for words instead of characters).
+	 * 
+	 * @param r reference string
+	 * @param h hypothesis string
+	 * @return word error rate (WER)
+	 */
+	public static double getWordErrorRate(String r, String h) {
+		if (r == null || h == null) {
+			throw new IllegalArgumentException("Strings must not be null");
+		}
+
+		//prepare string sequences 
+		String[] s = r.split(" ");
+		String[] t = h.split(" ");
+		int n = s.length;
+		int m = t.length;
+		
+		//basic size handling
+		if( n == 0 || m == 0 )
+			return Math.max(n, m);
+		if (n > m) {
+			// swap the input strings to consume less memory
+			String[] tmp = s;
+			s = t;
+			t = tmp;
+			n = m;
+			m = t.length;
+		}
+
+		final int[] p = new int[n + 1];
+		int i; // iterates through s
+		int j; // iterates through t
+		int upper_left;
+		int upper;
+		
+		String t_j; // jth word of t
+		int cost;
+		for (i = 0; i <= n; i++) {
+			p[i] = i;
+		}
+		for (j = 1; j <= m; j++) {
+			upper_left = p[0];
+			t_j = t[j - 1];
+			p[0] = j;
+			for (i = 1; i <= n; i++) {
+				upper = p[i];
+				cost = s[i - 1].equals(t_j) ? 0 : 1;
+				p[i] = Math.min(Math.min(p[i - 1] + 1, p[i] + 1), upper_left + cost);
+				upper_left = upper;
+			}
+		}
+		//wer = number of edits / length
+		return (double)p[n] / Math.max(n, m);
 	}
 }

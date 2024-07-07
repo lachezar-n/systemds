@@ -146,8 +146,15 @@ public class DenseBlockLBool extends DenseBlockLDRB
 	}
 
 	@Override
-	protected void fillBlock(int bix, int fromIndex, int toIndex, double v) {
+	public void fillBlock(int bix, int fromIndex, int toIndex, double v) {
 		_blocks[bix].set(fromIndex, toIndex, v != 0);
+	}
+
+	@Override 
+	public void fillRow(int r, double v){
+		int start = pos(r);
+		int end = start + getDim(1);
+		_blocks[index(r)].set(start, end, v != 0);
 	}
 
 	@Override
