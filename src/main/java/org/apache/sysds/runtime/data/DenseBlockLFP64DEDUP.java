@@ -174,7 +174,12 @@ public class DenseBlockLFP64DEDUP extends DenseBlockLDRB{
 	}
 
 	@Override
-	protected void fillBlock(int bix, int fromIndex, int toIndex, double v) {
+	public void fillBlock(int bix, int fromIndex, int toIndex, double v) {
+		throw new NotImplementedException();
+	}
+
+	@Override 
+	public void fillRow(int r, double v){
 		throw new NotImplementedException();
 	}
 

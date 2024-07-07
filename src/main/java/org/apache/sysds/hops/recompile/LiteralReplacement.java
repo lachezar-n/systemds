@@ -20,6 +20,7 @@
 package org.apache.sysds.hops.recompile;
 
 import java.util.ArrayList;
+import java.util.List;
 
 import org.apache.sysds.api.DMLScript;
 import org.apache.sysds.hops.AggUnaryOp;
@@ -93,7 +94,7 @@ public class LiteralReplacement
 					//because hop c marked as visited, and (2) repeated evaluation of uagg ops
 					
 					if( c.getParent().size() > 1 ) { //multiple parents
-						ArrayList<Hop> parents = new ArrayList<>(c.getParent());
+						List<Hop> parents = new ArrayList<>(c.getParent());
 						for( Hop p : parents ) {
 							int pos = HopRewriteUtils.getChildReferencePos(p, c);
 							HopRewriteUtils.removeChildReferenceByPos(p, c, pos);
@@ -211,7 +212,7 @@ public class LiteralReplacement
 				MatrixBlock mBlock = mo.acquireRead();
 				if( mBlock.getNumRows()!=1 || mBlock.getNumColumns()!=1 )
 					throw new DMLRuntimeException("Dimension mismatch - unable to cast matrix of dimension ("+mBlock.getNumRows()+" x "+mBlock.getNumColumns()+") to scalar.");
-				double value = mBlock.getValue(0,0);
+				double value = mBlock.get(0,0);
 				mo.release();
 				
 				//literal substitution (always double)
@@ -252,7 +253,11 @@ public class LiteralReplacement
 				if( mo.getNumRows()*mo.getNumColumns() < REPLACE_LITERALS_MAX_MATRIX_SIZE )
 				{
 					MatrixBlock mBlock = mo.acquireRead();
-					double value = mBlock.getValue((int)rlval-1,(int)clval-1);
+					if( rlval>mo.getNumRows() || clval>mo.getNumColumns() ) {
+						throw new DMLRuntimeException("Scalar indexing out-of-bounds:"
+							+ " ["+rlval+", "+clval+"] in "+mo.getDataCharacteristics());
+					}
+					double value = mBlock.get((int)rlval-1,(int)clval-1);
 					mo.release();
 					
 					//literal substitution (always double)
@@ -369,7 +374,7 @@ public class LiteralReplacement
 				&& HopRewriteUtils.isData(in, OpOpData.TRANSIENTREAD) ) {
 				ListObject list = (ListObject)ec.getVariables().get(in.getName());
 				if( list.getLength() <= 128 ) {
-					ArrayList<Hop> tmp = new ArrayList<>();
+					List<Hop> tmp = new ArrayList<>();
 					for( int i=0; i < list.getLength(); i++ ) {
 						String varname = Dag.getNextUniqueVarname(DataType.MATRIX);
 						MatrixObject mo = (MatrixObject) list.slice(i);

@@ -129,9 +129,17 @@ public class DenseBlockInt64 extends DenseBlockDRB
 	}
 
 	@Override
-	protected void fillBlock(int bix, int fromIndex, int toIndex, double v) {
+	public void fillBlock(int bix, int fromIndex, int toIndex, double v) {
 		Arrays.fill(_data, fromIndex, toIndex, UtilFunctions.toLong(v));
 	}
+
+	@Override 
+	public void fillRow(int r, double v){
+		int start = pos(r);
+		int end = start + getDim(1);
+		Arrays.fill(_data, start, end, UtilFunctions.toLong(v));
+	}
+
 
 	@Override
 	protected void setInternal(int bix, int ix, double v) {

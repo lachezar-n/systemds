@@ -762,7 +762,6 @@ public class VariableCPInstruction extends CPInstruction implements LineageTrace
 		//clone meta data because it is updated on copy-on-write, otherwise there
 		//is potential for hidden side effects between variables.
 		obj.setMetaData((MetaData)metadata.clone());
-		obj.setPrivacyConstraints(getPrivacyConstraint());
 		obj.enableCleanup(!getInput1().getName()
 			.startsWith(org.apache.sysds.lops.Data.PREAD_PREFIX));
 		obj.setFileFormatProperties(_formatProperties);
@@ -868,7 +867,7 @@ public class VariableCPInstruction extends CPInstruction implements LineageTrace
 				MatrixBlock mBlock = ec.getMatrixInput(getInput1().getName());
 				if( mBlock.getNumRows()!=1 || mBlock.getNumColumns()!=1 )
 					throw new DMLRuntimeException("Dimension mismatch - unable to cast matrix '"+getInput1().getName()+"' of dimension ("+mBlock.getNumRows()+" x "+mBlock.getNumColumns()+") to scalar. " + mBlock);
-				double value = mBlock.getValue(0,0);
+				double value = mBlock.get(0,0);
 				ec.releaseMatrixInput(getInput1().getName());
 				ec.setScalarOutput(output.getName(), new DoubleObject(value));
 				break;
@@ -933,7 +932,7 @@ public class VariableCPInstruction extends CPInstruction implements LineageTrace
 						throw new DMLRuntimeException("as.matrix over multi-entry list only allows scalars.");
 					MatrixBlock out = new MatrixBlock(list.getLength(), 1, false);
 					for( int i=0; i<list.getLength(); i++ )
-						out.quickSetValue(i, 0, ((ScalarObject)list.slice(i)).getDoubleValue());
+						out.set(i, 0, ((ScalarObject)list.slice(i)).getDoubleValue());
 					ec.setMatrixOutput(output.getName(), out);
 				}
 				else {
@@ -1071,18 +1070,14 @@ public class VariableCPInstruction extends CPInstruction implements LineageTrace
 				int blen = Integer.parseInt(getInput4().getName());
 				mo.exportData(fname, fmtStr, new FileFormatProperties(blen));
 			}
-			// Set privacy constraint of write instruction to the same as that of the input
-			setPrivacyConstraint(ec.getMatrixObject(getInput1().getName()).getPrivacyConstraint());
 		}
 		else if( getInput1().getDataType() == DataType.FRAME ) {
 			FrameObject mo = ec.getFrameObject(getInput1().getName());
 			mo.exportData(fname, fmtStr, _formatProperties);
-			setPrivacyConstraint(mo.getPrivacyConstraint());
 		}
 		else if( getInput1().getDataType() == DataType.TENSOR ) {
 			// TODO write tensor
 			TensorObject to = ec.getTensorObject(getInput1().getName());
-			setPrivacyConstraint(to.getPrivacyConstraint());
 			to.exportData(fname, fmtStr, _formatProperties);
 		}
 		else if( getInput1().getDataType() == DataType.LIST ) {
@@ -1153,8 +1148,8 @@ public class VariableCPInstruction extends CPInstruction implements LineageTrace
 				else {
 					mo.exportData(fname, outFmt, fprop);
 				}
-				HDFSTool.writeMetaDataFile(fname + ".mtd", mo.getValueType(),
-					dc, FileFormat.CSV, fprop, mo.getPrivacyConstraint());
+				HDFSTool.writeMetaDataFile(fname + ".mtd",
+					mo.getValueType(), dc, FileFormat.CSV, fprop);
 			}
 			catch(IOException e) {
 				throw new DMLRuntimeException(e);
@@ -1181,8 +1176,7 @@ public class VariableCPInstruction extends CPInstruction implements LineageTrace
 			try {
 				mo.exportData(fname, outFmt, _formatProperties);
 				HDFSTool.writeMetaDataFile(fname + ".mtd", mo.getValueType(),
-					mo.getMetaData().getDataCharacteristics(), FileFormat.LIBSVM, _formatProperties,
-				mo.getPrivacyConstraint());
+					mo.getMetaData().getDataCharacteristics(), FileFormat.LIBSVM, _formatProperties);
 			}
 			catch (IOException e) {
 				throw new DMLRuntimeException(e);
@@ -1217,8 +1211,7 @@ public class VariableCPInstruction extends CPInstruction implements LineageTrace
 				else {
 					mo.exportData(fname, outFmt, _formatProperties);
 				}
-				HDFSTool.writeMetaDataFile(fname + ".mtd", mo.getValueType(), dc, FileFormat.HDF5, _formatProperties,
-					mo.getPrivacyConstraint());
+				HDFSTool.writeMetaDataFile(fname + ".mtd", mo.getValueType(), dc, FileFormat.HDF5, _formatProperties);
 			}
 			catch (IOException e) {
 				throw new DMLRuntimeException(e);

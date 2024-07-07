@@ -52,6 +52,7 @@ public abstract class SparseBlock implements Serializable, Block
 		CSR,  // compressed sparse rows
 		DCSR, // double compressed sparse rows
 		MCSR, // modified compressed sparse rows (update-friendly)
+		MCSC, // modified compressed sparse column
 	}
 	
 	
@@ -474,12 +475,13 @@ public abstract class SparseBlock implements Serializable, Block
 	 * (note that NaN==NaN yields false).
 	 * 
 	 * @param pattern checked pattern
+	 * @param rl row lower bound (inclusive)
+	 * @param ru row upper bound (exclusive)
 	 * @return true if pattern appears at least once, otherwise false
 	 */
-	public boolean contains(double pattern) {
+	public boolean contains(double pattern, int rl, int ru) {
 		boolean NaNpattern = Double.isNaN(pattern);
-		int rlen = numRows();
-		for(int i=0; i<rlen; i++) {
+		for(int i=rl; i<ru; i++) {
 			if( isEmpty(i) ) continue;
 			int apos = pos(i);
 			int alen = size(i);
@@ -552,6 +554,32 @@ public abstract class SparseBlock implements Serializable, Block
 		//default generic iterator, override if necessary
 		return new SparseBlockIterator(rl, Math.min(ru,numRows()));
 	}
+
+	/**
+	 * Get an iterator over the indices of non-empty rows within the entire sparse block.
+	 * This iterator facilitates traversal over rows that contain at least one non-zero element,
+	 * skipping entirely zero rows. The returned integers represent the indexes of non-empty rows.
+	 *
+	 * @return iterable
+	 */
+	public Iterable<Integer> getNonEmptyRows() {
+		return new SparseNonEmptyRowIterable(0, numRows());
+	}
+
+	/**
+	 * Get an iterator over the indices of non-zero rows within the sub-block [rl,ru).
+	 * This iterator facilitates traversal over rows that contain at least one non-zero element,
+	 * skipping entirely zero rows. The returned integers represent the indexes of non-empty rows.
+	 *
+	 * @param rl inclusive lower row index starting at 0
+	 * @param ru exclusive upper row index starting at 0
+	 * @return iterable
+	 */
+	public Iterable<Integer> getNonEmptyRows(int rl, int ru) {
+		return new SparseNonEmptyRowIterable(rl, ru);
+	}
+	
+	public abstract Iterator<Integer> getNonEmptyRowsIterator(int rl, int ru);
 	
 	@Override 
 	public abstract String toString();
@@ -714,6 +742,23 @@ public abstract class SparseBlock implements Serializable, Block
 				_curIndexes = indexes(_curRow); 
 				_curValues = values(_curRow);
 			}
+		}
+	}
+	
+	//generic iterable for use in enhanced for loops: for(int i : s.getNonEmptyRows())
+	private class SparseNonEmptyRowIterable implements Iterable<Integer> {
+		private final int _rl; //row lower
+		private final int _ru; //row upper
+
+		protected SparseNonEmptyRowIterable(int rl, int ru) {
+			_rl = rl;
+			_ru  =ru;
+		}
+
+		@Override
+		public Iterator<Integer> iterator() {
+			//use specialized non-empty row iterators of sparse blocks
+			return getNonEmptyRowsIterator(_rl, _ru);
 		}
 	}
 }

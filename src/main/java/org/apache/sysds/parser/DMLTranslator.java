@@ -2191,7 +2191,6 @@ public class DMLTranslator
 		if( source.getOpCode()==DataExpression.DataOp.READ )
 			((DataOp)currBuiltinOp).setInputBlocksize(target.getBlocksize());
 		else if ( source.getOpCode() == DataExpression.DataOp.WRITE ) {
-			((DataOp)currBuiltinOp).setPrivacy(hops.get(target.getName()).getPrivacy());
 			if( source.getVarParam(DataExpression.ROWBLOCKCOUNTPARAM) != null )
 				currBuiltinOp.setBlocksize(Integer.parseInt(
 					source.getVarParam(DataExpression.ROWBLOCKCOUNTPARAM).toString()));
@@ -2237,12 +2236,18 @@ public class DMLTranslator
 			case QR:
 			case LU:
 			case EIGEN:
+			case FFT:
+			case IFFT:
+			case FFT_LINEARIZED:
+			case IFFT_LINEARIZED:
+			case STFT:
 			case LSTM:
 			case LSTM_BACKWARD:
 			case BATCH_NORM2D:
 			case BATCH_NORM2D_BACKWARD:
 			case REMOVE:
 			case SVD:
+			case RCM:
 
 				// Number of outputs = size of targetList = #of identifiers in source.getOutputs
 				String[] outputNames = new String[targetList.size()]; 
@@ -2913,7 +2918,6 @@ public class DMLTranslator
 		if( id.getNnz()>= 0 )
 			h.setNnz(id.getNnz());
 		h.setBlocksize(id.getBlocksize());
-		h.setPrivacy(id.getPrivacy());
 	}
 
 	private boolean prepareReadAfterWrite( DMLProgram prog, HashMap<String, DataIdentifier> pWrites ) {

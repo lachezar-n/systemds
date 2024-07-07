@@ -71,7 +71,7 @@ public final class CLALibBinaryCellOp {
 		MatrixBlock result) {
 
 		if(that.getNumRows() == 1 && that.getNumColumns() == 1) {
-			ScalarOperator sop = new RightScalarOperator(op.fn, that.getValue(0, 0), op.getNumThreads());
+			ScalarOperator sop = new RightScalarOperator(op.fn, that.get(0, 0), op.getNumThreads());
 			return CLALibScalar.scalarOperations(sop, m1, result);
 		}
 		else if(that.isEmpty())
@@ -98,7 +98,7 @@ public final class CLALibBinaryCellOp {
 	public static MatrixBlock binaryOperationsLeft(BinaryOperator op, CompressedMatrixBlock m1, MatrixBlock that,
 		MatrixBlock result) {
 		if(that.getNumRows() == 1 && that.getNumColumns() == 1) {
-			ScalarOperator sop = new LeftScalarOperator(op.fn, that.getValue(0, 0), op.getNumThreads());
+			ScalarOperator sop = new LeftScalarOperator(op.fn, that.get(0, 0), op.getNumThreads());
 			return CLALibScalar.scalarOperations(sop, m1, result);
 		}
 		if(that.isEmpty())
@@ -251,8 +251,8 @@ public final class CLALibBinaryCellOp {
 	private static void binaryMVRowMultiThread(List<AColGroup> oldColGroups, double[] v, BinaryOperator op, boolean left,
 		List<AColGroup> newColGroups, boolean isRowSafe, int k) {
 		final ExecutorService pool = CommonThreadPool.get(k);
-		final ArrayList<BinaryMVRowTask> tasks = new ArrayList<>();
 		try {
+			final ArrayList<BinaryMVRowTask> tasks = new ArrayList<>();
 			if(left)
 				for(AColGroup grp : oldColGroups)
 					tasks.add(new BinaryMVRowTaskLeft(grp, v, op, isRowSafe));
@@ -265,10 +265,11 @@ public final class CLALibBinaryCellOp {
 
 		}
 		catch(InterruptedException | ExecutionException e) {
-			pool.shutdown();
 			throw new DMLRuntimeException(e);
 		}
-		pool.shutdown();
+		finally{
+			pool.shutdown();
+		}
 	}
 
 	private static CompressedMatrixBlock binaryMVRow(CompressedMatrixBlock m1, MatrixBlock m2, CompressedMatrixBlock ret,
@@ -391,8 +392,8 @@ public final class CLALibBinaryCellOp {
 		final int blkz = ret.getNumRows() / k;
 		long nnz = 0;
 		final ExecutorService pool = CommonThreadPool.get(op.getNumThreads());
-		final ArrayList<Callable<Integer>> tasks = new ArrayList<>();
 		try {
+			final ArrayList<Callable<Integer>> tasks = new ArrayList<>();
 			for(int i = 0; i < nRows; i += blkz) {
 				if(left)
 					tasks.add(new BinaryMVColLeftTask(m1, m2, ret, i, Math.min(nRows, i + blkz), op));
@@ -401,10 +402,12 @@ public final class CLALibBinaryCellOp {
 			}
 			for(Future<Integer> f : pool.invokeAll(tasks))
 				nnz += f.get();
-			pool.shutdown();
 		}
 		catch(InterruptedException | ExecutionException e) {
 			throw new DMLRuntimeException(e);
+		}
+		finally {
+			pool.shutdown();
 		}
 		return nnz;
 	}
@@ -416,7 +419,6 @@ public final class CLALibBinaryCellOp {
 
 		MatrixBlock ret = new MatrixBlock(nRows, nCols, false, -1).allocateBlock();
 
-		// final int k = op.getNumThreads();
 		long nnz = binaryMMMultiThread(m1, m2, op, left, ret);
 
 		ret.setNonZeros(nnz);
@@ -431,17 +433,19 @@ public final class CLALibBinaryCellOp {
 		final int blkz = ret.getNumRows() / k;
 		long nnz = 0;
 		final ExecutorService pool = CommonThreadPool.get(op.getNumThreads());
-		final ArrayList<Callable<Long>> tasks = new ArrayList<>();
 		try {
+			final ArrayList<Callable<Long>> tasks = new ArrayList<>();
 			for(int i = 0; i < nRows; i += blkz)
 				tasks.add(new BinaryMMTask(m1, m2, ret, i, Math.min(nRows, i + blkz), op, left));
 
 			for(Future<Long> f : pool.invokeAll(tasks))
 				nnz += f.get();
-			pool.shutdown();
 		}
 		catch(InterruptedException | ExecutionException e) {
 			throw new DMLRuntimeException(e);
+		}
+		finally{
+			pool.shutdown();
 		}
 		return nnz;
 	}

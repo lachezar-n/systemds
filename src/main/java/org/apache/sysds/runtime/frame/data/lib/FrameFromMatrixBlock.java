@@ -95,7 +95,7 @@ public class FrameFromMatrixBlock {
 					case FP64:
 						break;
 					default:
-						final double v =  mb.quickGetValue(r, c);
+						final double v =  mb.get(r, c);
 						if(v > Integer.MAX_VALUE)
 							schema[c] = ValueType.FP64; // handle Integer overflow.
 						schema[c] = FrameUtil.isType(v, schema[c]);
@@ -114,16 +114,17 @@ public class FrameFromMatrixBlock {
 				convertToFrameBlockSparse();
 			else
 				convertToFrameBlockDense();
-			if(pool != null)
-				pool.shutdown();
 			if(frame.getNumRows() != mb.getNumRows())
 				throw new DMLRuntimeException("Invalid result");
 
 			return frame;
 		}
 		catch(InterruptedException | ExecutionException e) {
-			pool.shutdown();
 			throw new DMLRuntimeException("failed to convert to matrix block");
+		}
+		finally{
+			if(pool != null)
+				pool.shutdown();
 		}
 	}
 

@@ -34,7 +34,7 @@ public class RewriteDistributiveMatrixMultTest extends AutomatedTestBase {
 	private static final String TEST_NAME1 = "RewriteDistributiveMatrixMult";
 	private static final String TEST_DIR = "functions/rewrite/";
 	private static final String TEST_CLASS_DIR =
-		TEST_DIR + RewriteSimplifyRowColSumMVMultTest.class.getSimpleName() + "/";
+		TEST_DIR + RewriteDistributiveMatrixMultTest.class.getSimpleName() + "/";
 
 	private static final int rows = 500;
 	private static final int cols = 500;

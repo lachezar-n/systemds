@@ -127,6 +127,8 @@ public class LocalFileUtils
 	public static Writable readWritableFromLocal(String fname, Writable ret)
 		throws IOException
 	{
+		if(fname == null)
+			throw new IOException("Cannot read from null fname");
 		FileInputStream fis = new FileInputStream(fname);
 		DataInput in = !(ret instanceof MatrixBlock) ? 
 			new DataInputStream(new BufferedInputStream(fis, BUFFER_SIZE)) :
@@ -231,20 +233,16 @@ public class LocalFileUtils
 	 * @param doubleBuffering overlay serialization and I/O
 	 * @throws IOException if IOException occurs
 	 */
-	public static void writeWritableToLocal(String fname, Writable mb, boolean doubleBuffering)
-		throws IOException
-	{
-		OutputStream fos = new FileOutputStream( fname );
-		if( doubleBuffering )
-			fos = new DoubleBufferingOutputStream(fos, 2, BUFFER_SIZE);
-		FastBufferedDataOutputStream out = new FastBufferedDataOutputStream(fos, BUFFER_SIZE);
-		
+	public static void writeWritableToLocal(String fname, Writable mb, boolean doubleBuffering) throws IOException {
+		OutputStream fout = doubleBuffering ?
+			new DoubleBufferingOutputStream(new FileOutputStream(fname), 2, BUFFER_SIZE) :
+			new FileOutputStream(fname);
+		FastBufferedDataOutputStream dout = new FastBufferedDataOutputStream(fout, BUFFER_SIZE);
 		try {
-			mb.write(out);
+			mb.write(dout);
 		}
 		finally {
-			IOUtilFunctions.closeSilently(out); //incl double buffering
-			IOUtilFunctions.closeSilently(fos);
+			IOUtilFunctions.closeSilently(dout);
 		}
 	}
 

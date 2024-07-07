@@ -81,7 +81,6 @@ import org.apache.sysds.runtime.matrix.data.MatrixBlock;
 import org.apache.sysds.runtime.meta.DataCharacteristics;
 import org.apache.sysds.runtime.util.UtilFunctions;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -264,7 +263,7 @@ public class HopRewriteUtils {
 	 * @return hnew
 	 */
 	public static Hop rewireAllParentChildReferences( Hop hold, Hop hnew ) {
-		ArrayList<Hop> parents = hold.getParent();
+		List<Hop> parents = hold.getParent();
 		while (!parents.isEmpty())
 			HopRewriteUtils.replaceChildReference(parents.get(0), hold, hnew);
 		return hnew;
@@ -487,7 +486,7 @@ public class HopRewriteUtils {
 		return datagen;
 	}
 	
-	public static Hop createDataGenOpByVal( ArrayList<LiteralOp> values, long rows, long cols ) 
+	public static Hop createDataGenOpByVal( List<LiteralOp> values, long rows, long cols ) 
 	{
 		StringBuilder sb = new StringBuilder();
 		for(LiteralOp lit : values) {
@@ -606,7 +605,7 @@ public class HopRewriteUtils {
 		return reorg;
 	}
 	
-	public static ReorgOp createReorg(ArrayList<Hop> inputs, ReOrgOp rop) {
+	public static ReorgOp createReorg(List<Hop> inputs, ReOrgOp rop) {
 		Hop main = inputs.get(0);
 		ReorgOp reorg = new ReorgOp(main.getName(), main.getDataType(), main.getValueType(), rop, inputs);
 		reorg.setBlocksize(main.getBlocksize());
@@ -697,7 +696,9 @@ public class HopRewriteUtils {
 	}
 	
 	public static ParameterizedBuiltinOp createParameterizedBuiltinOp(Hop input, LinkedHashMap<String,Hop> args, ParamBuiltinOp op) {
-		ParameterizedBuiltinOp pbop = new ParameterizedBuiltinOp("tmp", DataType.MATRIX, ValueType.FP64, op, args);
+		DataType dt = op == ParamBuiltinOp.TOSTRING ? DataType.SCALAR : DataType.MATRIX;
+		ValueType vt = op == ParamBuiltinOp.TOSTRING ? ValueType.STRING : ValueType.FP64;
+		ParameterizedBuiltinOp pbop = new ParameterizedBuiltinOp("tmp", dt, vt, op, args);
 		pbop.setBlocksize(input.getBlocksize());
 		copyLineNumbers(input, pbop);
 		pbop.refreshSizeInformation();
@@ -1014,7 +1015,7 @@ public class HopRewriteUtils {
 		return isTransposeOperation(hop) && hop.getParent().size() <= maxParents;
 	}
 	
-	public static boolean containsTransposeOperation(ArrayList<Hop> hops) {
+	public static boolean containsTransposeOperation(List<Hop> hops) {
 		boolean ret = false;
 		for( Hop hop : hops )
 			ret |= isTransposeOperation(hop);
@@ -1203,18 +1204,18 @@ public class HopRewriteUtils {
 		return (hop instanceof AggUnaryOp && ((AggUnaryOp)hop).getOp()==AggOp.SUM_SQ);
 	}
 
-	public static boolean isParameterBuiltinOp(Hop hop, ParamBuiltinOp type) {
+	public static boolean isParameterizedBuiltinOp(Hop hop, ParamBuiltinOp type) {
 		return hop instanceof ParameterizedBuiltinOp && ((ParameterizedBuiltinOp) hop).getOp().equals(type);
 	}
 	
 	public static boolean isRemoveEmpty(Hop hop, boolean rows) {
-		return isParameterBuiltinOp(hop, ParamBuiltinOp.RMEMPTY)
+		return isParameterizedBuiltinOp(hop, ParamBuiltinOp.RMEMPTY)
 			&& HopRewriteUtils.isLiteralOfValue(
 				((ParameterizedBuiltinOp)hop).getParameterHop("margin"), rows?"rows":"cols");
 	}
 
 	public static boolean isRemoveEmpty(Hop hop) {
-		return isParameterBuiltinOp(hop, ParamBuiltinOp.RMEMPTY);
+		return isParameterizedBuiltinOp(hop, ParamBuiltinOp.RMEMPTY);
 	}
 	
 	public static boolean isNary(Hop hop, OpOpN type) {
@@ -1396,7 +1397,7 @@ public class HopRewriteUtils {
 	
 	public static boolean hasOnlyWriteParents( Hop hop, boolean inclTransient, boolean inclPersistent ) {
 		boolean ret = true;
-		ArrayList<Hop> parents = hop.getParent();
+		List<Hop> parents = hop.getParent();
 		for( Hop p : parents ) {
 			if( inclTransient && inclPersistent )
 				ret &= ( p instanceof DataOp && (((DataOp)p).getOp()==OpOpData.TRANSIENTWRITE
@@ -1423,7 +1424,7 @@ public class HopRewriteUtils {
 			 && ((DataOp)hop).getFileFormat()!=FileFormat.BINARY);
 	}
 	
-	public static boolean containsOp(ArrayList<Hop> candidates, Class<? extends Hop> clazz) {
+	public static boolean containsOp(List<Hop> candidates, Class<? extends Hop> clazz) {
 		if( candidates != null )
 			for( Hop cand : candidates )
 				if( cand.getClass().equals(clazz) )
@@ -1650,7 +1651,7 @@ public class HopRewriteUtils {
 			&& hop.getInput().stream().anyMatch(h -> h.getDataType().isList());
 	}
 	
-	public static boolean containsSecondOrderBuiltin(ArrayList<Hop> roots) {
+	public static boolean containsSecondOrderBuiltin(List<Hop> roots) {
 		Hop.resetVisitStatus(roots);
 		return roots.stream().anyMatch(r -> containsSecondOrderBuiltin(r));
 	}
@@ -1659,7 +1660,7 @@ public class HopRewriteUtils {
 		if( hop.isVisited() ) return false;
 		hop.setVisited();
 		return HopRewriteUtils.isNary(hop, OpOpN.EVAL)
-			|| (HopRewriteUtils.isParameterBuiltinOp(hop, ParamBuiltinOp.PARAMSERV) 
+			|| (HopRewriteUtils.isParameterizedBuiltinOp(hop, ParamBuiltinOp.PARAMSERV) 
 				&& !knownParamservFunctions(hop))
 			|| hop.getInput().stream().anyMatch(c -> containsSecondOrderBuiltin(c));
 	}

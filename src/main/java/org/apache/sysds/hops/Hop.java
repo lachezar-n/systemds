@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -38,7 +40,6 @@ import org.apache.sysds.common.Types.ValueType;
 import org.apache.sysds.conf.CompilerConfig.ConfigType;
 import org.apache.sysds.conf.ConfigurationManager;
 import org.apache.sysds.hops.cost.ComputeCost;
-import org.apache.sysds.hops.cost.FederatedCost;
 import org.apache.sysds.hops.recompile.Recompiler;
 import org.apache.sysds.hops.recompile.Recompiler.ResetType;
 import org.apache.sysds.lops.CSVReBlock;
@@ -63,7 +64,6 @@ import org.apache.sysds.runtime.lineage.LineageCacheConfig;
 import org.apache.sysds.runtime.matrix.data.MatrixBlock;
 import org.apache.sysds.runtime.meta.DataCharacteristics;
 import org.apache.sysds.runtime.meta.MatrixCharacteristics;
-import org.apache.sysds.runtime.privacy.PrivacyConstraint;
 import org.apache.sysds.runtime.util.UtilFunctions;
 
 /**
@@ -84,13 +84,12 @@ public abstract class Hop implements ParseInfo {
 	protected ValueType _valueType;
 	protected boolean _visited = false;
 	protected DataCharacteristics _dc = new MatrixCharacteristics();
-	protected PrivacyConstraint _privacyConstraint = null;
 	protected UpdateType _updateType = UpdateType.COPY;
 
 	/** The output Hops that are connected to this Hop */
-	protected ArrayList<Hop> _parent = new ArrayList<>();
+	protected List<Hop> _parent = new ArrayList<>();
 	/** The input Hops that are connected to this Hop */
-	protected ArrayList<Hop> _input = new ArrayList<>();
+	protected List<Hop> _input = new ArrayList<>();
 
 	/** Currently used exec type */
 	protected ExecType _etype = null; 
@@ -103,12 +102,6 @@ public abstract class Hop implements ParseInfo {
 	 * If it is lout, the output should be retrieved by the coordinator.
 	 */
 	protected FederatedOutput _federatedOutput = FederatedOutput.NONE;
-	/** The Federated Cost of this Hop */
-	protected FederatedCost _federatedCost = new FederatedCost();
-	/** The estimated number of repetitions of this Hop*/
-	protected double repetitions = 1;
-	/** Boolean specifying if the repetition count is updated/assigned */
-	protected boolean repetitionsUpdated = false;
 
 	/**
 	 * Field defining if prefetch should be activated for operation.
@@ -459,7 +452,6 @@ public abstract class Hop implements ParseInfo {
 			// replace this lop with the reblock instruction
 			setOutputDimensions(reblock);
 			setLineNumbers(reblock);
-			setPrivacy(reblock);
 			setLops(reblock);
 		}
 	}
@@ -514,15 +506,17 @@ public abstract class Hop implements ParseInfo {
 			ExecType et = getExecutionModeForCompression();
 
 			Lop compressionInstruction = null;
-		
+			
+			//TODO generalize threads
+			final int k = OptimizerUtils.getConstrainedNumThreads(-1); 
 			if(requiresCompression()) {
 				if(_compressedWorkloadTree != null) {
 					SingletonLookupHashMap m = SingletonLookupHashMap.getMap();
 					int singletonID = m.put(_compressedWorkloadTree);
-					compressionInstruction = new Compression(getLops(), getDataType(), getValueType(), et, singletonID);
+					compressionInstruction = new Compression(getLops(), getDataType(), getValueType(), et, singletonID, k);
 				}
 				else
-					compressionInstruction = new Compression(getLops(), getDataType(), getValueType(), et, 0);
+					compressionInstruction = new Compression(getLops(), getDataType(), getValueType(), et, 0, k);
 			}
 			else if(_requiresDeCompression && et != ExecType.SPARK) // Disabled spark decompression instruction.
 				compressionInstruction = new DeCompression(getLops(), getDataType(), getValueType(), et);
@@ -941,11 +935,11 @@ public abstract class Hop implements ParseInfo {
 		return false;
 	}
 
-	public ArrayList<Hop> getParent() {
+	public List<Hop> getParent() {
 		return _parent;
 	}
 
-	public ArrayList<Hop> getInput() {
+	public List<Hop> getInput() {
 		return _input;
 	}
 	
@@ -958,7 +952,7 @@ public abstract class Hop implements ParseInfo {
 		h._parent.add(this);
 	}
 	
-	public void addAllInputs( ArrayList<Hop> list ) {
+	public void addAllInputs( List<Hop> list ) {
 		for( Hop h : list )
 			addInput(h);
 	}
@@ -979,14 +973,6 @@ public abstract class Hop implements ParseInfo {
 		return _dc.getNonZeros();
 	}
 
-	public void setPrivacy(PrivacyConstraint privacy){
-		_privacyConstraint = privacy;
-	}
-
-	public PrivacyConstraint getPrivacy(){
-		return _privacyConstraint;
-	}
-
 	public FederatedOutput getFederatedOutput(){
 		return _federatedOutput;
 	}
@@ -997,31 +983,6 @@ public abstract class Hop implements ParseInfo {
 
 	public boolean hasLocalOutput(){
 		return _federatedOutput == FederatedOutput.LOUT;
-	}
-
-	/**
-	 * Check if federated cost has been initialized for this Hop.
-	 * @return true if federated cost has been initialized
-	 */
-	public boolean federatedCostInitialized(){
-		return _federatedCost.getTotal() > 0;
-	}
-
-	public FederatedCost getFederatedCost(){
-		return _federatedCost;
-	}
-
-	public void setFederatedCost(FederatedCost cost){
-		_federatedCost = cost;
-	}
-
-	/**
-	 * Reset federated cost of this hop and all children of this hop.
-	 */
-	public void resetFederatedCost(){
-		_federatedCost = new FederatedCost();
-		for ( Hop input : getInput() )
-			input.resetFederatedCost();
 	}
 
 	public void setUpdateType(UpdateType update){
@@ -1134,13 +1095,13 @@ public abstract class Hop implements ParseInfo {
 		return _dataType.isScalar() || _dc.colsKnown();
 	}
 	
-	public static void resetVisitStatus( ArrayList<Hop> hops ) {
+	public static void resetVisitStatus( List<Hop> hops ) {
 		if( hops != null )
 			for( Hop hopRoot : hops )
 				hopRoot.resetVisitStatus();
 	}
 	
-	public static void resetVisitStatus( ArrayList<Hop> hops, boolean force ) {
+	public static void resetVisitStatus( List<Hop> hops, boolean force ) {
 		if( !force )
 			resetVisitStatus(hops);
 		else {
@@ -1417,7 +1378,7 @@ public abstract class Hop implements ParseInfo {
 		setDim1(computeSizeInformation(input, vars));
 	}
 
-	public void refreshRowsParameterInformation( Hop input, LocalVariableMap vars, HashMap<Long,Long> memo ) {
+	public void refreshRowsParameterInformation( Hop input, LocalVariableMap vars, Map<Long,Long> memo ) {
 		setDim1(computeSizeInformation(input, vars, memo));
 	}
 	
@@ -1425,7 +1386,7 @@ public abstract class Hop implements ParseInfo {
 		setDim2(computeSizeInformation(input, vars));
 	}
 	
-	public void refreshColsParameterInformation( Hop input, LocalVariableMap vars, HashMap<Long,Long> memo ) {
+	public void refreshColsParameterInformation( Hop input, LocalVariableMap vars, Map<Long,Long> memo ) {
 		setDim2(computeSizeInformation(input, vars, memo));
 	}
 
@@ -1433,7 +1394,7 @@ public abstract class Hop implements ParseInfo {
 		return computeSizeInformation(input, vars, new HashMap<Long,Long>());
 	}
 	
-	public long computeSizeInformation( Hop input, LocalVariableMap vars, HashMap<Long,Long> memo )
+	public long computeSizeInformation( Hop input, LocalVariableMap vars, Map<Long,Long> memo )
 	{
 		long ret = -1;
 		try {
@@ -1464,7 +1425,7 @@ public abstract class Hop implements ParseInfo {
 		return computeBoundsInformation(input, vars, new HashMap<Long, Double>());
 	}
 	
-	public static double computeBoundsInformation( Hop input, LocalVariableMap vars, HashMap<Long, Double> memo ) {
+	public static double computeBoundsInformation( Hop input, LocalVariableMap vars, Map<Long, Double> memo ) {
 		double ret = Double.MAX_VALUE;
 		try {
 			ret = OptimizerUtils.rEvalSimpleDoubleExpression(input, memo, vars);
@@ -1578,20 +1539,6 @@ public abstract class Hop implements ParseInfo {
 		return ret;
 	}
 
-	public void updateRepetitionEstimates(double repetitions){
-		LOG.trace("Updating repetition estimates of " + this.getName() + " to " + repetitions);
-		if ( !federatedCostInitialized() && !repetitionsUpdated ){
-			this.repetitions = repetitions;
-			this.repetitionsUpdated = true;
-			for ( Hop input : getInput() )
-				input.updateRepetitionEstimates(repetitions);
-		}
-	}
-
-	public double getRepetitions(){
-		return repetitions;
-	}
-
 	/**
 	 * Clones the attributes of that and copies it over to this.
 	 * 
@@ -1620,7 +1567,6 @@ public abstract class Hop implements ParseInfo {
 		_etype = that._etype;
 		_etypeForced = that._etypeForced;
 		_federatedOutput = that._federatedOutput;
-		_federatedCost = that._federatedCost;
 		_outputMemEstimate = that._outputMemEstimate;
 		_memEstimate = that._memEstimate;
 		_processingMemEstimate = that._processingMemEstimate;
@@ -1694,10 +1640,6 @@ public abstract class Hop implements ParseInfo {
 	 */
 	protected void setLineNumbers(Lop lop) {
 		lop.setAllPositions(getFilename(), getBeginLine(), getBeginColumn(), getEndLine(), getEndColumn());
-	}
-	
-	protected void setPrivacy(Lop lop) {
-		lop.setPrivacyConstraint(getPrivacy());
 	}
 
 	protected void setMemoryAndComputeEstimates(Lop lop) {

@@ -99,7 +99,7 @@ public class LibMatrixAgg {
 	//internal configuration parameters
 	private static final boolean NAN_AWARENESS = false;
 	private static final long PAR_NUMCELL_THRESHOLD1 = 1024*1024; //Min 1M elements
-	private static final long PAR_NUMCELL_THRESHOLD2 = 16*1024;   //Min 16K elements
+	private static final long PAR_NUMCELL_THRESHOLD2 = 1024;   //Min 16K elements
 	private static final long PAR_INTERMEDIATE_SIZE_THRESHOLD = 2*1024*1024; //Max 2MB
 	
 	////////////////////////////////
@@ -286,8 +286,8 @@ public class LibMatrixAgg {
 
 		//core multi-threaded unary aggregate computation
 		//(currently: always parallelization over number of rows)
+		ExecutorService pool = CommonThreadPool.get(k);
 		try {
-			ExecutorService pool = CommonThreadPool.get(k);
 			ArrayList<AggTask> tasks = new ArrayList<>();
 			ArrayList<Integer> blklens = UtilFunctions.getBalancedBlockSizesDefault(m, k,
 				(uaop.indexFn instanceof ReduceRow)); //use static partitioning for col*()
@@ -296,21 +296,29 @@ public class LibMatrixAgg {
 					new RowAggTask(in, out, aggtype, uaop, lb, lb+blklens.get(i)) :
 					new PartialAggTask(in, out, aggtype, uaop, lb, lb+blklens.get(i)) );
 			}
-			pool.invokeAll(tasks);
-			pool.shutdown();
+			List<Future<Object>> rtasks = pool.invokeAll(tasks);
+
 			//aggregate partial results
-			if( !(uaop.indexFn instanceof ReduceCol) ) {
+			if( uaop.indexFn instanceof ReduceCol ) {
+				//error handling and nnz aggregation
+				out.setNonZeros(rtasks.stream()
+					.mapToLong(t -> (long)UtilFunctions.getSafe(t)).sum());
+			}
+			else { //colAgg()/agg()
 				out.copy(((PartialAggTask)tasks.get(0)).getResult(), false); //for init
 				for( int i=1; i<tasks.size(); i++ )
 					aggregateFinalResult(uaop.aggOp, out, ((PartialAggTask)tasks.get(i)).getResult());
+				out.recomputeNonZeros();
 			}
 		}
 		catch(Exception ex) {
 			throw new DMLRuntimeException(ex);
 		}
+		finally{
+			pool.shutdown();
+		}
 		
 		//cleanup output and change representation (if necessary)
-		out.recomputeNonZeros();
 		out.examSparsity();
 		
 		//System.out.println("uagg k="+k+" ("+in.rlen+","+in.clen+","+in.sparse+") in "+time.stop()+"ms.");
@@ -395,8 +403,8 @@ public class LibMatrixAgg {
 		
 		//core multi-threaded unary aggregate computation
 		//(currently: always parallelization over number of rows)
+		ExecutorService pool = CommonThreadPool.get(k);
 		try {
-			ExecutorService pool = CommonThreadPool.get(k);
 			int blklen = (int)(Math.ceil((double)m/k));
 			
 			//step 1: compute aggregates per row partition
@@ -425,9 +433,7 @@ public class LibMatrixAgg {
 					DataConverter.convertToDoubleVector(tmp2.slice(i-1, i-1, 0, n2-1, new MatrixBlock()), false);
 				tasks2.add( new CumAggTask(in, agg, out, aggtype, uop, i*blklen, Math.min((i+1)*blklen, m)) );
 			}
-			List<Future<Long>> taskret2 = pool.invokeAll(tasks2);
-			pool.shutdown();
-			
+			List<Future<Long>> taskret2 = pool.invokeAll(tasks2);		
 			//step 4: aggregate nnz
 			out.nonZeros = 0; 
 			for( Future<Long> task : taskret2 )
@@ -435,6 +441,9 @@ public class LibMatrixAgg {
 		}
 		catch(Exception ex) {
 			throw new DMLRuntimeException(ex);
+		}
+		finally{
+			pool.shutdown();
 		}
 		
 		//cleanup output and change representation (if necessary)
@@ -489,22 +498,26 @@ public class LibMatrixAgg {
 		if( in1.isEmptyBlock(false) || !satisfiesMultiThreadingConstraints(in1, k) )
 			return aggregateCmCov(in1, in2, in3, fn);
 		
-		CM_COV_Object ret = new CM_COV_Object();
+		CM_COV_Object ret = null;
 		
+		ExecutorService pool = CommonThreadPool.get(k);
 		try {
-			ExecutorService pool = CommonThreadPool.get(k);
 			ArrayList<AggCmCovTask> tasks = new ArrayList<>();
 			ArrayList<Integer> blklens = UtilFunctions.getBalancedBlockSizesDefault(in1.rlen, k, false);
 			for( int i=0, lb=0; i<blklens.size(); lb+=blklens.get(i), i++ )
 				tasks.add(new AggCmCovTask(in1, in2, in3, fn, lb, lb+blklens.get(i)));
 			List<Future<CM_COV_Object>> rtasks = pool.invokeAll(tasks);
-			pool.shutdown();
+			
 			//aggregate partial results and error handling
+			ret = rtasks.get(0).get();
 			for( int i=1; i<rtasks.size(); i++ )
 				fn.execute(ret, rtasks.get(i).get());
 		}
 		catch(Exception ex) {
 			throw new DMLRuntimeException(ex);
+		}
+		finally{
+			pool.shutdown();
 		}
 		
 		return ret;
@@ -554,15 +567,15 @@ public class LibMatrixAgg {
 			
 		//Timing time = new Timing(true);
 		
+		ExecutorService pool = CommonThreadPool.get(k);
 		try {
-			ExecutorService pool = CommonThreadPool.get(k);
 			ArrayList<AggTernaryTask> tasks = new ArrayList<>();
 			int blklen = (int)(Math.ceil((double)in1.rlen/k));
 			IndexFunction ixFn = op.indexFn;
 			for( int i=0; i<k & i*blklen<in1.rlen; i++ )
 				tasks.add( new AggTernaryTask(in1, in2, in3, ret, ixFn, i*blklen, Math.min((i+1)*blklen, in1.rlen)));
 			List<Future<MatrixBlock>> rtasks = pool.invokeAll(tasks);	
-			pool.shutdown();
+
 			//aggregate partial results and error handling
 			ret.copy(rtasks.get(0).get(), false); //for init
 			for( int i=1; i<rtasks.size(); i++ )
@@ -570,6 +583,9 @@ public class LibMatrixAgg {
 		}
 		catch(Exception ex) {
 			throw new DMLRuntimeException(ex);
+		}
+		finally{
+			pool.shutdown();
 		}
 		
 		//cleanup output and change representation (if necessary)
@@ -629,19 +645,22 @@ public class LibMatrixAgg {
 		
 		//core multi-threaded grouped aggregate computation
 		//(currently: parallelization over columns to avoid additional memory requirements)
+		ExecutorService pool = CommonThreadPool.get(k);
 		try {
-			ExecutorService pool = CommonThreadPool.get(k);
 			ArrayList<GrpAggTask> tasks = new ArrayList<>();
 			int blklen = (int)(Math.ceil((double)target.clen/k));
 			for( int i=0; i<k & i*blklen<target.clen; i++ )
 				tasks.add( new GrpAggTask(groups, target, weights, result, numGroups, op, i*blklen, Math.min((i+1)*blklen, target.clen)) );
 			List<Future<Object>> taskret = pool.invokeAll(tasks);
-			pool.shutdown();
+
 			for(Future<Object> task : taskret)
 				task.get(); //error handling
 		}
 		catch(Exception ex) {
 			throw new DMLRuntimeException(ex);
+		}
+		finally{
+			pool.shutdown();
 		}
 		
 		//postprocessing
@@ -663,13 +682,13 @@ public class LibMatrixAgg {
 		boolean sharedTP = (InfrastructureAnalyzer.getLocalParallelism() == k);
 		return k > 1 && out.isThreadSafe() && in.rlen > (sharedTP ? k/8 : k/2)
 			&& (uaop.indexFn instanceof ReduceCol || out.clen*8*k < PAR_INTERMEDIATE_SIZE_THRESHOLD) //size
-			&& in.nonZeros > (sharedTP ? PAR_NUMCELL_THRESHOLD2 : PAR_NUMCELL_THRESHOLD1);
+			&& in.nonZeros > (sharedTP ? k*PAR_NUMCELL_THRESHOLD2 : PAR_NUMCELL_THRESHOLD1);
 	}
 	
 	public static boolean satisfiesMultiThreadingConstraints(MatrixBlock in, int k) {
 		boolean sharedTP = (InfrastructureAnalyzer.getLocalParallelism() == k);
 		return k > 1 && in.rlen > (sharedTP ? k/8 : k/2)
-			&& in.nonZeros > (sharedTP ? PAR_NUMCELL_THRESHOLD2 : PAR_NUMCELL_THRESHOLD1);
+			&& in.nonZeros > (sharedTP ? k*PAR_NUMCELL_THRESHOLD2 : PAR_NUMCELL_THRESHOLD1);
 	}
 	
 	/**
@@ -816,8 +835,8 @@ public class LibMatrixAgg {
 			if (in1.sparse && in1.sparseBlock!=null) { //SPARSE
 				for(int i = rl; i < ru; i++) { 
 					fn.execute(ret,
-						in1.quickGetValue(i,0),
-						in2.quickGetValue(i,0));
+						in1.get(i,0),
+						in2.get(i,0));
 				}
 			}
 			else if(in1.denseBlock!=null) //DENSE
@@ -833,7 +852,7 @@ public class LibMatrixAgg {
 				}
 				else {
 					for(int i = rl; i < ru; i++) 
-						fn.execute(ret, a[i], in2.quickGetValue(i,0) );
+						fn.execute(ret, a[i], in2.get(i,0) );
 				}
 			}
 		}
@@ -841,9 +860,9 @@ public class LibMatrixAgg {
 			if(in1.sparse && in1.sparseBlock!=null) { //SPARSE
 				for(int i = rl; i < ru; i++ ) {
 					fn.execute(ret,
-						in1.quickGetValue(i,0),
-						in2.quickGetValue(i,0),
-						in3.quickGetValue(i,0));
+						in1.get(i,0),
+						in2.get(i,0),
+						in3.get(i,0));
 				}
 			}
 			else if(in1.denseBlock!=null) { //DENSE
@@ -861,8 +880,8 @@ public class LibMatrixAgg {
 				else {
 					for(int i = rl; i < ru; i++) {
 						fn.execute(ret, a[i],
-							in2.quickGetValue(i,0),
-							in3.quickGetValue(i,0));
+							in2.get(i,0),
+							in3.get(i,0));
 					}
 				}
 			}
@@ -890,8 +909,8 @@ public class LibMatrixAgg {
 					double val = a[ix] * b1[ix] * b2val;
 					kplus.execute2( kbuff, val );
 				}
-			ret.quickSetValue(0, 0, kbuff._sum);
-			ret.quickSetValue(0, 1, kbuff._correction);
+			ret.set(0, 0, kbuff._sum);
+			ret.set(0, 1, kbuff._correction);
 		}
 		else //tack+*
 		{
@@ -943,15 +962,15 @@ public class LibMatrixAgg {
 					double[] avals = a.values(i);
 					for( int j=apos; j<apos+alen; j++ ) {
 						double val1 = avals[j];
-						double val2 = lin2.quickGetValue(i, aix[j]);
+						double val2 = lin2.get(i, aix[j]);
 						double val = val1 * val2;
 						if( val != 0 && lin3 != null )
-							val *= lin3.quickGetValue(i, aix[j]);
+							val *= lin3.get(i, aix[j]);
 						kplus.execute2( kbuff, val );
 					}
 				}	
-			ret.quickSetValue(0, 0, kbuff._sum);
-			ret.quickSetValue(0, 1, kbuff._correction);
+			ret.set(0, 0, kbuff._sum);
+			ret.set(0, 1, kbuff._correction);
 		}
 		else //tack+*
 		{
@@ -965,10 +984,10 @@ public class LibMatrixAgg {
 					for( int j=apos; j<apos+alen; j++ ) {
 						int colIx = aix[j];
 						double val1 = avals[j];
-						double val2 = lin2.quickGetValue(i, colIx);
+						double val2 = lin2.get(i, colIx);
 						double val = val1 * val2;
 						if( val != 0 && lin3 != null )
-							val *= lin3.quickGetValue(i, colIx);
+							val *= lin3.get(i, colIx);
 						kbuff._sum = c[colIx];
 						kbuff._correction = c[colIx+n];
 						kplus.execute2( kbuff, val );	
@@ -1023,11 +1042,11 @@ public class LibMatrixAgg {
 					double[] avals = target.sparseBlock.values(0);
 					for( int j=pos; j<pos+len; j++ ) //for each nnz
 					{
-						int g = (int) groups.quickGetValue(aix[j], 0);
+						int g = (int) groups.get(aix[j], 0);
 						if ( g > numGroups )
 							continue;
 						if ( weights != null )
-							w = weights.quickGetValue(aix[j],0);
+							w = weights.get(aix[j],0);
 						aggop.increOp.fn.execute(buffer[g-1][0], avals[j]*w);
 					}
 				}
@@ -1039,11 +1058,11 @@ public class LibMatrixAgg {
 					double d = a[ i ];
 					if( d != 0 ) //sparse-safe
 					{
-						int g = (int) groups.quickGetValue(i, 0);
+						int g = (int) groups.get(i, 0);
 						if ( g > numGroups )
 							continue;
 						if ( weights != null )
-							w = weights.quickGetValue(i,0);
+							w = weights.get(i,0);
 						// buffer is 0-indexed, whereas range of values for g = [1,numGroups]
 						aggop.increOp.fn.execute(buffer[g-1][0], d*w);
 					}
@@ -1058,7 +1077,7 @@ public class LibMatrixAgg {
 				
 				for( int i=0; i < groups.getNumRows(); i++ ) 
 				{
-					int g = (int) groups.quickGetValue(i, 0);
+					int g = (int) groups.get(i, 0);
 					if ( g > numGroups )
 						continue;
 					
@@ -1074,7 +1093,7 @@ public class LibMatrixAgg {
 						for( ; j<pos+len && aix[j]<cu; j++ ) //for each nnz
 						{
 							if ( weights != null )
-								w = weights.quickGetValue(aix[j],0);
+								w = weights.get(aix[j],0);
 							aggop.increOp.fn.execute(buffer[g-1][aix[j]-cl], avals[j]*w);
 						}
 					}
@@ -1084,7 +1103,7 @@ public class LibMatrixAgg {
 			{
 				DenseBlock a = target.getDenseBlock();
 				for( int i=0; i < groups.getNumRows(); i++ ) {
-					int g = (int) groups.quickGetValue(i, 0);
+					int g = (int) groups.get(i, 0);
 					if ( g > numGroups )
 						continue;
 					double[] avals = a.values(i);
@@ -1093,7 +1112,7 @@ public class LibMatrixAgg {
 						double d = avals[ aix+j ];
 						if( d != 0 ) { //sparse-safe
 							if ( weights != null )
-								w = weights.quickGetValue(i,0);
+								w = weights.get(i,0);
 							// buffer is 0-indexed, whereas range of values for g = [1,numGroups]
 							aggop.increOp.fn.execute(buffer[g-1][j-cl], d*w);
 						}
@@ -1128,12 +1147,12 @@ public class LibMatrixAgg {
 				new SideInput(null, target, target.clen));
 			
 			for( int i=0; i < groups.getNumRows(); i++ ) {
-				int g = (int) groups.quickGetValue(i, 0);
+				int g = (int) groups.get(i, 0);
 				if( g > numGroups ) continue;
 				
 				//sparse unsafe correction empty row
 				if( a.isEmpty(i) ){
-					w = (weights != null) ? weights.quickGetValue(i,0) : w;
+					w = (weights != null) ? weights.get(i,0) : w;
 					for( int j=cl; j<cu; j++ )
 						cmFn.execute(cmValues[g-1][j-cl], 0, w);
 					continue;
@@ -1143,7 +1162,7 @@ public class LibMatrixAgg {
 				for( int j=cl; j<cu; j++ ) {
 					double d = sa.getValue(i, j);
 					if ( weights != null )
-						w = weights.quickGetValue(i,0);
+						w = weights.get(i,0);
 					cmFn.execute(cmValues[g-1][j-cl], d, w);
 				}
 			}
@@ -1151,7 +1170,7 @@ public class LibMatrixAgg {
 		else { //DENSE target
 			DenseBlock a = target.getDenseBlock();
 			for( int i=0; i < groups.getNumRows(); i++ ) {
-				int g = (int) groups.quickGetValue(i, 0);
+				int g = (int) groups.get(i, 0);
 				if ( g > numGroups )
 					continue;
 				double[] avals = a.values(i);
@@ -1159,7 +1178,7 @@ public class LibMatrixAgg {
 				for( int j=cl; j<cu; j++ ) {
 					double d = avals[ aix+j ]; //sparse unsafe
 					if ( weights != null )
-						w = weights.quickGetValue(i,0);
+						w = weights.get(i,0);
 					// buffer is 0-indexed, whereas range of values for g = [1,numGroups]
 					cmFn.execute(cmValues[g-1][j-cl], d, w);
 				}
@@ -1290,11 +1309,11 @@ public class LibMatrixAgg {
 				for( int j=apos; j<apos+alen; j++ )
 				{
 					int jix = aix[j];
-					buffer1._sum        = aggVal.quickGetValue(i, jix);
-					buffer1._correction = aggCorr.quickGetValue(i, jix);
+					buffer1._sum        = aggVal.get(i, jix);
+					buffer1._correction = aggCorr.get(i, jix);
 					akplus.execute2(buffer1, avals[j]);
-					aggVal.quickSetValue(i, jix, buffer1._sum);
-					aggCorr.quickSetValue(i, jix, buffer1._correction);
+					aggVal.set(i, jix, buffer1._sum);
+					aggCorr.set(i, jix, buffer1._correction);
 				}
 			}
 		}
@@ -1319,11 +1338,11 @@ public class LibMatrixAgg {
 		for(int i=0, ix=0; i<m; i++)
 			for(int j=0; j<n; j++, ix++)
 			{
-				buffer._sum = aggVal.quickGetValue(i, j);
-				buffer._correction = aggCorr.quickGetValue(i, j);
+				buffer._sum = aggVal.get(i, j);
+				buffer._correction = aggCorr.get(i, j);
 				akplus.execute(buffer, a[ix]);
-				aggVal.quickSetValue(i, j, buffer._sum);
-				aggCorr.quickSetValue(i, j, buffer._correction);
+				aggVal.set(i, j, buffer._sum);
+				aggCorr.set(i, j, buffer._correction);
 			}
 		
 		//note: nnz of aggVal/aggCorr maintained internally 
@@ -1400,12 +1419,12 @@ public class LibMatrixAgg {
 			
 			for( int j=apos; j<apos+alen; j++ ) {
 				int jix = aix[j];
-				double corr = in.quickGetValue(m-1, jix);
-				buffer1._sum        = aggVal.quickGetValue(i, jix);
-				buffer1._correction = aggVal.quickGetValue(m-1, jix);
+				double corr = in.get(m-1, jix);
+				buffer1._sum        = aggVal.get(i, jix);
+				buffer1._correction = aggVal.get(m-1, jix);
 				akplus.execute(buffer1, avals[j], corr);
-				aggVal.quickSetValue(i, jix, buffer1._sum);
-				aggVal.quickSetValue(m-1, jix, buffer1._correction);
+				aggVal.set(i, jix, buffer1._sum);
+				aggVal.set(m-1, jix, buffer1._correction);
 			}
 		}
 	}
@@ -1426,11 +1445,11 @@ public class LibMatrixAgg {
 		for(int i=0, ix=0; i<m; i++, ix+=n)
 			for(int j=0; j<n-1; j++)
 			{
-				buffer._sum = aggVal.quickGetValue(i, j);
-				buffer._correction = aggVal.quickGetValue(i, n-1);
+				buffer._sum = aggVal.get(i, j);
+				buffer._correction = aggVal.get(i, n-1);
 				akplus.execute(buffer, a[ix+j], a[ix+j+1]);
-				aggVal.quickSetValue(i, j, buffer._sum);
-				aggVal.quickSetValue(i, n-1, buffer._correction);
+				aggVal.set(i, j, buffer._sum);
+				aggVal.set(i, n-1, buffer._correction);
 			}
 
 	}
@@ -1461,12 +1480,12 @@ public class LibMatrixAgg {
 				for( int j=apos; j<apos+alen && aix[j]<n-1; j++ )
 				{
 					int jix = aix[j];
-					double corr = in.quickGetValue(i, n-1);
-					buffer1._sum        = aggVal.quickGetValue(i, jix);
-					buffer1._correction = aggVal.quickGetValue(i, n-1);
+					double corr = in.get(i, n-1);
+					buffer1._sum        = aggVal.get(i, jix);
+					buffer1._correction = aggVal.get(i, n-1);
 					akplus.execute(buffer1, avals[j], corr);
-					aggVal.quickSetValue(i, jix, buffer1._sum);
-					aggVal.quickSetValue(i, n-1, buffer1._correction);
+					aggVal.set(i, jix, buffer1._sum);
+					aggVal.set(i, n-1, buffer1._correction);
 				}
 			}
 		}
@@ -1804,7 +1823,7 @@ public class LibMatrixAgg {
 				case MAX_INDEX:
 				default:           val = Double.NaN; break;
 			}
-			out.quickSetValue(0, 0, val);
+			out.set(0, 0, val);
 			return out;
 		}
 		
@@ -1824,7 +1843,7 @@ public class LibMatrixAgg {
 			case MAX_INDEX: {
 				if( ixFn instanceof ReduceCol ) { //ROWINDEXMAX
 					for(int i=0; i<out.rlen; i++) {
-						out.quickSetValue(i, 0, in.clen); //maxindex
+						out.set(i, 0, in.clen); //maxindex
 					}
 				}
 				break;
@@ -1832,31 +1851,31 @@ public class LibMatrixAgg {
 			case MIN_INDEX: {
 				if( ixFn instanceof ReduceCol ) //ROWINDEXMIN
 					for(int i=0; i<out.rlen; i++) {
-						out.quickSetValue(i, 0, in.clen); //minindex
+						out.set(i, 0, in.clen); //minindex
 					}
 				break;
 			}
 			case MEAN: {
 				if( ixFn instanceof ReduceAll ) // MEAN
-					out.quickSetValue(0, 1, in.rlen*in.clen); //count
+					out.set(0, 1, in.rlen*in.clen); //count
 				else if( ixFn instanceof ReduceCol ) //ROWMEAN
 					for( int i=0; i<in.rlen; i++ ) //0-sum and 0-correction 
-						out.quickSetValue(i, 1, in.clen); //count
+						out.set(i, 1, in.clen); //count
 				else if( ixFn instanceof ReduceRow ) //COLMEAN
 					for( int j=0; j<in.clen; j++ ) //0-sum and 0-correction 
-						out.quickSetValue(1, j, in.rlen); //count
+						out.set(1, j, in.rlen); //count
 				break;
 			}
 			case VAR: {
 				// results: { var | mean, count, m2 correction, mean correction }
 				if( ixFn instanceof ReduceAll ) //VAR
-					out.quickSetValue(0, 2, in.rlen*in.clen); //count
+					out.set(0, 2, in.rlen*in.clen); //count
 				else if( ixFn instanceof ReduceCol ) //ROWVAR
 					for( int i=0; i<in.rlen; i++ )
-						out.quickSetValue(i, 2, in.clen); //count
+						out.set(i, 2, in.clen); //count
 				else if( ixFn instanceof ReduceRow ) //COLVAR
 					for( int j=0; j<in.clen; j++ )
-						out.quickSetValue(2, j, in.rlen); //count
+						out.set(2, j, in.rlen); //count
 				break;
 			}
 			case CUM_SUM_PROD:{
@@ -1887,7 +1906,7 @@ public class LibMatrixAgg {
 	 */
 	private static void d_uakp( DenseBlock a, DenseBlock c, int n, KahanObject kbuff, KahanPlus kplus, int rl, int ru ) {
 		if(a instanceof DenseBlockFP64DEDUP)
-			uakpDedup(a, c, n, kbuff, kplus, rl, ru);
+			uakpDedup((DenseBlockFP64DEDUP) a, c, n, kbuff, kplus, rl, ru);
 		else {
 			final int bil = a.index(rl);
 			final int biu = a.index(ru - 1);
@@ -1928,7 +1947,7 @@ public class LibMatrixAgg {
 	private static void d_uarkp( DenseBlock a, DenseBlock c, int n, KahanObject kbuff, KahanPlus kplus, int rl, int ru ) 
 	{
 		if(a instanceof DenseBlockFP64DEDUP)
-			uarkpDedup(a, c, n, kbuff, kplus, rl, ru);
+			uarkpDedup((DenseBlockFP64DEDUP) a, c, n, kbuff, kplus, rl, ru);
 		else {
 			for (int i = rl; i < ru; i++) {
 				kbuff.set(0, 0); //reset buffer
@@ -1962,7 +1981,7 @@ public class LibMatrixAgg {
 	 */
 	private static void d_uackp( DenseBlock a, DenseBlock c, int n, KahanObject kbuff, KahanPlus kplus, int rl, int ru ) {
 		if(a instanceof DenseBlockFP64DEDUP)
-			uackpDedup(a, c, n, kbuff, kplus, rl, ru);
+			uackpDedup((DenseBlockFP64DEDUP) a, c, n, kbuff, kplus, rl, ru);
 		else {
 			for( int i=rl; i<ru; i++ )
 				sumAgg( a.values(i), c, a.pos(i), n, kbuff, kplus );
@@ -3627,10 +3646,15 @@ public class LibMatrixAgg {
 	/////////////////////////////////////////////////////
 
 
-	private static void uakpDedup (DenseBlock a, DenseBlock c, int n, KahanObject kbuff, KahanPlus kplus, int rl, int ru) {
+	private static void uakpDedup (DenseBlockFP64DEDUP a, DenseBlock c, int n, KahanObject kbuff, KahanPlus kplus, int rl, int ru) {
 		HashMap<double[], Integer> counts = new HashMap<>();
+		if(a.getNrEmbsPerRow() != 1){
+			//TODO: currently impossible case, since Dedup reshape is not supported yet, once it is, this method needs
+			// to be implemented
+			throw new NotImplementedException("Check TODO");
+		}
 		for(int i = rl; i < ru; i++) {
-			double[] row = a.values(i);
+			double[] row = a.getDedupDirectly(i);
 			Integer count = counts.getOrDefault(row, 0);
 			count += 1;
 			counts.put(row, count);
@@ -3642,14 +3666,18 @@ public class LibMatrixAgg {
 		});
 	}
 
-	private static void uarkpDedup( DenseBlock a, DenseBlock c, int n, KahanObject kbuff, KahanPlus kplus, int rl, int ru ) {
+	private static void uarkpDedup( DenseBlockFP64DEDUP a, DenseBlock c, int n, KahanObject kbuff, KahanPlus kplus, int rl, int ru ) {
 		HashMap<double[], double[]> cache = new HashMap<>();
+		if(a.getNrEmbsPerRow() != 1){
+			//TODO: currently impossible case, since Dedup reshape is not supported yet, once it is, this method needs
+			// to be implemented
+			throw new NotImplementedException("Check TODO");
+		}
 		for(int i = rl; i < ru; i++) {
-			double[] row = a.values(i);
-			int finalI = i;
+			double[] row = a.getDedupDirectly(i);
 			double[] kbuff_array = cache.computeIfAbsent(row, lambda_row -> {
 				kbuff.set(0, 0);
-				sum(lambda_row, a.pos(finalI), n, kbuff, kplus);
+				sum(lambda_row, 0, n, kbuff, kplus);
 				return new double[] {kbuff._sum, kbuff._correction};
 			});
 			cache.putIfAbsent(row, kbuff_array);
@@ -3658,10 +3686,15 @@ public class LibMatrixAgg {
 		}
 	}
 
-	private static void uackpDedup( DenseBlock a, DenseBlock c, int n, KahanObject kbuff, KahanPlus kplus, int rl, int ru ) {
+	private static void uackpDedup( DenseBlockFP64DEDUP a, DenseBlock c, int n, KahanObject kbuff, KahanPlus kplus, int rl, int ru ) {
 		HashMap<double[], Integer> counts = new HashMap<>();
+		if(a.getNrEmbsPerRow() != 1){
+			//TODO: currently impossible case, since Dedup reshape is not supported yet, once it is, this method needs
+			// to be implemented
+			throw new NotImplementedException("Check TODO");
+		}
 		for(int i = rl; i < ru; i++) {
-			double[] row = a.values(i);
+			double[] row = a.getDedupDirectly(i);
 			Integer count = counts.getOrDefault(row, 0);
 			count += 1;
 			counts.put(row, count);
@@ -3763,7 +3796,7 @@ public class LibMatrixAgg {
 				aggregateUnaryMatrixDense(_in, _ret, _aggtype, _uaop.aggOp.increOp.fn, _uaop.indexFn, _rl, _ru);
 			else
 				aggregateUnaryMatrixSparse(_in, _ret, _aggtype, _uaop.aggOp.increOp.fn, _uaop.indexFn, _rl, _ru);
-			return null;
+			return _ret.recomputeNonZeros(_rl, _ru-1);
 		}
 	}
 

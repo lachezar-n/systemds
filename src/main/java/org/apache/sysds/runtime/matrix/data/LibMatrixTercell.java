@@ -48,18 +48,18 @@ public class LibMatrixTercell
 		final boolean s1 = (m1.rlen==1 && m1.clen==1);
 		final boolean s2 = (m2.rlen==1 && m2.clen==1);
 		final boolean s3 = (m3.rlen==1 && m3.clen==1);
-		final double d1 = s1 ? m1.quickGetValue(0, 0) : Double.NaN;
-		final double d2 = s2 ? m2.quickGetValue(0, 0) : Double.NaN;
-		final double d3 = s3 ? m3.quickGetValue(0, 0) : Double.NaN;
+		final double d1 = s1 ? m1.get(0, 0) : Double.NaN;
+		final double d2 = s2 ? m2.get(0, 0) : Double.NaN;
+		final double d3 = s3 ? m3.get(0, 0) : Double.NaN;
 		
 		//allocate dense/sparse output
 		ret.allocateBlock();
 		
 		//execute ternary cell operations
 		if( op.getNumThreads() > 1 && ret.getLength() > PAR_NUMCELL_THRESHOLD) {
+			ExecutorService pool = CommonThreadPool.get(op.getNumThreads());
 			try {
 				//execute binary cell operations
-				ExecutorService pool = CommonThreadPool.get(op.getNumThreads());
 				ArrayList<TercellTask> tasks = new ArrayList<>();
 				ArrayList<Integer> blklens = UtilFunctions
 					.getBalancedBlockSizesDefault(ret.rlen, op.getNumThreads(), false);
@@ -71,10 +71,12 @@ public class LibMatrixTercell
 				ret.nonZeros = 0; //reset after execute
 				for( Future<Long> task : taskret )
 					ret.nonZeros += task.get();
-				pool.shutdown();
 			}
 			catch(InterruptedException | ExecutionException ex) {
 				throw new DMLRuntimeException(ex);
+			}
+			finally{
+				pool.shutdown();
 			}
 		}
 		else {
@@ -92,9 +94,9 @@ public class LibMatrixTercell
 		long lnnz = 0;
 		for( int i=rl; i<ru; i++ )
 			for( int j=0; j<n; j++ ) {
-				double in1 = s1 ? d1 : m1.quickGetValue(i, j);
-				double in2 = s2 ? d2 : m2.quickGetValue(i, j);
-				double in3 = s3 ? d3 : m3.quickGetValue(i, j);
+				double in1 = s1 ? d1 : m1.get(i, j);
+				double in2 = s2 ? d2 : m2.get(i, j);
+				double in3 = s3 ? d3 : m3.get(i, j);
 				double val = op.fn.execute(in1, in2, in3);
 				lnnz += (val != 0) ? 1 : 0;
 				ret.appendValuePlain(i, j, val);

@@ -22,6 +22,7 @@ package org.apache.sysds.runtime.data;
 import java.io.DataInput;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Iterator;
 
 import org.apache.sysds.runtime.util.SortUtils;
 import org.apache.sysds.runtime.util.UtilFunctions;
@@ -280,6 +281,21 @@ public class SparseBlockCSR extends SparseBlock
 		size += MemoryEstimates.intArrayCost((long) lnnz);   //indexes array (column indexes)
 		size += MemoryEstimates.doubleArrayCost((long) lnnz);//values array (non-zero values)
 		
+		//robustness for long overflows
+		return (long) Math.min(size, Long.MAX_VALUE);
+	}
+
+	/**
+	 * Computes the exact size in memory of the materialized block
+	 * @return the exact size in memory
+	 */
+	public long getExactSizeInMemory() {
+		//32B overhead per array, int arr in nrows, int/double arr in nnz
+		double size = 16 + 4 + 4;                                //object + int field + padding
+		size += MemoryEstimates.intArrayCost(_ptr.length);       //ptr array (row pointers)
+		size += MemoryEstimates.intArrayCost(_indexes.length);   //indexes array (column indexes)
+		size += MemoryEstimates.doubleArrayCost(_values.length); //values array (non-zero values)
+
 		//robustness for long overflows
 		return (long) Math.min(size, Long.MAX_VALUE);
 	}
@@ -965,16 +981,43 @@ public class SparseBlockCSR extends SparseBlock
 	}
 	
 	@Override //specialized for CSR
-	public boolean contains(double pattern) {
+	public boolean contains(double pattern, int rl, int ru) {
 		boolean NaNpattern = Double.isNaN(pattern);
 		double[] vals = _values;
-		int len = _size;
-		for(int i=0; i<len; i++)
+		int prl = pos(rl), pru = pos(ru);
+		for(int i=prl; i<pru; i++)
 			if(vals[i]==pattern || (NaNpattern && Double.isNaN(vals[i])))
 				return true;
 		return false;
 	}
 
+	@Override
+	public Iterator<Integer> getNonEmptyRowsIterator(int rl, int ru) {
+		return new NonEmptyRowsIteratorCSR(rl, ru);
+	}
+	
+	public class NonEmptyRowsIteratorCSR implements Iterator<Integer> {
+		private int _rpos;
+		private final int _ru;
+		
+		public NonEmptyRowsIteratorCSR(int rl, int ru) {
+			_rpos = rl;
+			_ru = ru;
+		}
+		
+		@Override
+		public boolean hasNext() {
+			while( _rpos<_ru && isEmpty(_rpos) )
+				_rpos++;
+			return _rpos < _ru;
+		}
+
+		@Override
+		public Integer next() {
+			return _rpos++;
+		}
+	}
+	
 	///////////////////////////
 	// private helper methods
 	

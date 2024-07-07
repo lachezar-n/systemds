@@ -29,3 +29,4 @@ echo "Waiting for cluster terminated state"
 aws emr wait cluster-terminated --cluster-id $CLUSTER_ID --region $REGION
 
 echo "Cluster: ${CLUSTER_ID} terminated."
+

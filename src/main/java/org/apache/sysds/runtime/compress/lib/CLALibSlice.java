@@ -88,12 +88,13 @@ public final class CLALibSlice {
 			final List<MatrixBlock> mbs = new ArrayList<>(tasks.size());
 			for(Future<MatrixBlock> f : pool.invokeAll(tasks))
 				mbs.add(f.get());
-			pool.shutdown();
 			return mbs;
 		}
 		catch(Exception e) {
-			pool.shutdown();
 			throw new DMLRuntimeException("Failed slicing compressed matrix block", e);
+		}
+		finally{
+			pool.shutdown();
 		}
 	}
 
@@ -168,7 +169,7 @@ public final class CLALibSlice {
 	private static MatrixBlock sliceSingle(CompressedMatrixBlock cmb, int row, int col) {
 		// get a single index, and return in a matrixBlock
 		MatrixBlock tmp = new MatrixBlock(1, 1, 0);
-		tmp.setValue(0, 0, cmb.getValue(row, col));
+		tmp.set(0, 0, cmb.get(row, col));
 		return tmp;
 	}
 

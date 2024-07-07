@@ -130,9 +130,13 @@ public enum Builtins {
 	EXP("exp", false),
 	EVAL("eval", false),
 	EVALLIST("evalList", false),
+	F1SCORE("f1Score", true),
+	FDR("fdr", "FDR", true),
 	FIT_PIPELINE("fit_pipeline", true),
 	FIX_INVALID_LENGTHS("fixInvalidLengths", true),
 	FIX_INVALID_LENGTHS_APPLY("fixInvalidLengthsApply", true),
+	FFT("fft", false, ReturnType.MULTI_RETURN),
+	FFT_LINEARIZED("fft_linearized", false, ReturnType.MULTI_RETURN),
 	FF_TRAIN("ffTrain", true),
 	FF_PREDICT("ffPredict", true),
 	FLOOR("floor", false),
@@ -154,6 +158,8 @@ public enum Builtins {
 	HOSPITAL_RESIDENCY_MATCH("hospitalResidencyMatch", true),
 	HYPERBAND("hyperband", true),
 	IFELSE("ifelse", false),
+	IFFT("ifft", false, ReturnType.MULTI_RETURN),
+	IFFT_LINEARIZED("ifft_linearized", false, ReturnType.MULTI_RETURN),
 	IMG_MIRROR("img_mirror", true),
 	IMG_MIRROR_LINEARIZED("img_mirror_linearized", true),
 	IMG_BRIGHTNESS("img_brightness", true),
@@ -186,6 +192,7 @@ public enum Builtins {
 	IMPUTE_BY_MODE_APPLY("imputeByModeApply", true),
 	IMPUTE_FD("imputeByFD", true),
 	IMPUTE_FD_APPLY("imputeByFDApply", true),
+	INCSLICELINE("incSliceLine", true),
 	INTERQUANTILE("interQuantile", false),
 	INTERSECT("intersect", true),
 	INVERSE("inv", "inverse", false),
@@ -253,6 +260,7 @@ public enum Builtins {
 	OUTLIER_IQR_APPLY("outlierByIQRApply", true),
 	OUTLIER_SD("outlierBySd", true),
 	OUTLIER_SD_APPLY("outlierBySdApply", true),
+	PAGERANK("pageRank", true),
 	PCA("pca", true),
 	PCAINVERSE("pcaInverse", true),
 	PCATRANSFORM("pcaTransform", true),
@@ -263,10 +271,15 @@ public enum Builtins {
 	PSNR("psnr", true),
 	QR("qr", false, ReturnType.MULTI_RETURN),
 	QUANTILE("quantile", false),
+	QUANTIZEBYCLUSTER("quantizeByCluster", true),
 	RANDOM_FOREST("randomForest", true),
 	RANDOM_FOREST_PREDICT("randomForestPredict", true),
 	RANGE("range", false),
+	RAGROUPBY("raGroupby", true),
+	RAJOIN("raJoin", true),
+	RASELECTION("raSelection", true),
 	RBIND("rbind", false),
+	RCM("rowClassMeet", "rcm", false, false, ReturnType.MULTI_RETURN),
 	REMOVE("remove", false, ReturnType.MULTI_RETURN),
 	REV("rev", false),
 	ROUND("round", false),
@@ -293,7 +306,8 @@ public enum Builtins {
 	SIGN("sign", false),
 	SIN("sin", false),
 	SINH("sinh", false),
-	SLICEFINDER("slicefinder", true),
+	SLICEFINDER("slicefinder", true), //TODO rename
+	SLICELINE_DEBUG("sliceLineDebug", true),
 	SKEWNESS("skewness", true),
 	SMAPE("smape", true),
 	SMOTE("smote", true),
@@ -305,6 +319,7 @@ public enum Builtins {
 	STATSNA("statsNA", true),
 	STRATSTATS("stratstats", true),
 	STEPLM("steplm",true, ReturnType.MULTI_RETURN),
+	STFT("stft", false, ReturnType.MULTI_RETURN),
 	SQRT("sqrt", false),
 	SUM("sum", false),
 	SVD("svd", false, ReturnType.MULTI_RETURN),
@@ -322,6 +337,7 @@ public enum Builtins {
 	VAR("var", false),
 	VALUE_SWAP("valueSwap", false),
 	VECTOR_TO_CSV("vectorToCsv", true),
+	WER("wer", true, false),
 	WINSORIZE("winsorize", true, false), //TODO parameterize w/ prob, min/max val
 	WINSORIZEAPPLY("winsorizeApply", true, false), //TODO parameterize w/ prob, min/max val
 	WOE("WoE", true ),
@@ -471,6 +487,7 @@ public enum Builtins {
 
 	public static String getInternalFName(String name, DataType dt) {
 		return !contains(name, true, false) ? name : // private builtin
-				(dt.isMatrix() ? "m_" : "s_") + name;    // public builtin
+				(dt.isMatrix() ? "m_" :              // public builtin
+				 dt.isFrame() ? "f_" : "s_") + name;
 	}
 }

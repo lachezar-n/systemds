@@ -19,6 +19,15 @@
 
 package org.apache.sysds.runtime.matrix.data;
 
+import static org.apache.sysds.runtime.matrix.data.LibMatrixFourier.fft;
+import static org.apache.sysds.runtime.matrix.data.LibMatrixFourier.fft_linearized;
+import static org.apache.sysds.runtime.matrix.data.LibMatrixFourier.ifft;
+import static org.apache.sysds.runtime.matrix.data.LibMatrixFourier.ifft_linearized;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Map.Entry;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.commons.math3.exception.MaxCountExceededException;
@@ -32,22 +41,26 @@ import org.apache.commons.math3.linear.QRDecomposition;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.apache.commons.math3.linear.SingularValueDecomposition;
 import org.apache.sysds.runtime.DMLRuntimeException;
+import org.apache.sysds.runtime.codegen.CodegenUtils;
+import org.apache.sysds.runtime.codegen.SpoofOperator.SideInput;
+import org.apache.sysds.runtime.compress.utils.IntArrayList;
 import org.apache.sysds.runtime.data.DenseBlock;
-import org.apache.sysds.runtime.functionobjects.Multiply;
-import org.apache.sysds.runtime.functionobjects.Divide;
-import org.apache.sysds.runtime.functionobjects.SwapIndex;
-import org.apache.sysds.runtime.functionobjects.MinusMultiply;
 import org.apache.sysds.runtime.functionobjects.Builtin;
+import org.apache.sysds.runtime.functionobjects.Divide;
+import org.apache.sysds.runtime.functionobjects.MinusMultiply;
+import org.apache.sysds.runtime.functionobjects.Multiply;
+import org.apache.sysds.runtime.functionobjects.SwapIndex;
 import org.apache.sysds.runtime.instructions.InstructionUtils;
-import org.apache.sysds.runtime.matrix.operators.RightScalarOperator;
-import org.apache.sysds.runtime.matrix.operators.LeftScalarOperator;
-import org.apache.sysds.runtime.matrix.operators.ScalarOperator;
-import org.apache.sysds.runtime.matrix.operators.UnaryOperator;
-import org.apache.sysds.runtime.matrix.operators.TernaryOperator;
-import org.apache.sysds.runtime.matrix.operators.ReorgOperator;
 import org.apache.sysds.runtime.matrix.operators.AggregateBinaryOperator;
 import org.apache.sysds.runtime.matrix.operators.BinaryOperator;
+import org.apache.sysds.runtime.matrix.operators.LeftScalarOperator;
+import org.apache.sysds.runtime.matrix.operators.ReorgOperator;
+import org.apache.sysds.runtime.matrix.operators.RightScalarOperator;
+import org.apache.sysds.runtime.matrix.operators.ScalarOperator;
+import org.apache.sysds.runtime.matrix.operators.TernaryOperator;
+import org.apache.sysds.runtime.matrix.operators.UnaryOperator;
 import org.apache.sysds.runtime.util.DataConverter;
+import org.apache.sysds.runtime.util.UtilFunctions;
 
 /**
  * Library for matrix operations that need invocation of 
@@ -71,7 +84,21 @@ public class LibCommonsMath
 	}
 	
 	public static boolean isSupportedMultiReturnOperation( String opcode ) {
-		return ( opcode.equals("qr") || opcode.equals("lu") || opcode.equals("eigen") || opcode.equals("svd") );
+
+		switch (opcode) {
+			case "eigen":
+			case "fft":
+			case "fft_linearized":
+			case "ifft":
+			case "ifft_linearized":
+			case "lu":
+			case "qr":
+			case "rcm":
+			case "stft":
+			case "svd": return true;
+			default: return false;
+		}
+
 	}
 	
 	public static boolean isSupportedMatrixMatrixOperation( String opcode ) {
@@ -87,8 +114,16 @@ public class LibCommonsMath
 		return null;
 	}
 
-	public static MatrixBlock[] multiReturnOperations(MatrixBlock in, String opcode) {
-		return multiReturnOperations(in, opcode, 1, 1);
+	// public static MatrixBlock[] multiReturnOperations(MatrixBlock in, String opcode) {
+	// 	return multiReturnOperations(in, opcode, 1, 1);
+	// }
+
+	public static MatrixBlock[] multiReturnOperations(MatrixBlock in, String opcode, int threads) {
+		return multiReturnOperations(in, opcode, threads, 1);
+	}
+
+	public static MatrixBlock[] multiReturnOperations(MatrixBlock in1, MatrixBlock in2, String opcode) {
+		return multiReturnOperations(in1, in2, opcode, 1, 1);
 	}
 
 	public static MatrixBlock[] multiReturnOperations(MatrixBlock in, String opcode, int threads, int num_iterations, double tol) {
@@ -113,9 +148,33 @@ public class LibCommonsMath
 			return computeEigenQR(in, threads);
 		else if (opcode.equals("svd"))
 			return computeSvd(in);
+		else if (opcode.equals("fft"))
+			return computeFFT(in, threads);
+		else if (opcode.equals("ifft"))
+			return computeIFFT(in, threads);
+		else if (opcode.equals("fft_linearized"))
+			return computeFFT_LINEARIZED(in, threads);
+		else if (opcode.equals("ifft_linearized"))
+			return computeIFFT_LINEARIZED(in, threads);
 		return null;
 	}
-	
+
+	public static MatrixBlock[] multiReturnOperations(MatrixBlock in1, MatrixBlock in2, String opcode, int threads,
+			long seed) {
+
+		switch (opcode) {
+			case "ifft":
+				return computeIFFT(in1, in2, threads);
+			case "ifft_linearized":
+				return computeIFFT_LINEARIZED(in1, in2, threads);
+			case "rcm":
+				return computeRCM(in1, in2);
+			default:
+				return null;
+		}
+
+	}
+
 	public static MatrixBlock matrixMatrixOperations(MatrixBlock in1, MatrixBlock in2, String opcode) {
 		if(opcode.equals("solve")) {
 			if (in1.getNumRows() != in1.getNumColumns())
@@ -253,6 +312,177 @@ public class LibCommonsMath
 	}
 
 	/**
+	 * Function to perform FFT on a given matrix.
+	 *
+	 * @param re      matrix object
+	 * @param threads number of threads
+	 * @return array of matrix blocks
+	 */
+	private static MatrixBlock[] computeFFT(MatrixBlock re, int threads) {
+		if(re == null)
+			throw new DMLRuntimeException("Invalid empty block");
+		if(re.isEmptyBlock(false)) {
+			// Return the original matrix as the result
+			// Assuming you need to return two matrices: the real part and an imaginary part initialized to 0.
+			return new MatrixBlock[] {re, new MatrixBlock(re.getNumRows(), re.getNumColumns(), true)};
+		}
+		// run fft
+		re.sparseToDense();
+		return fft(re, threads);
+	}
+
+	/**
+	 * Function to perform IFFT on a given matrix.
+	 *
+	 * @param re      matrix object
+	 * @param im      matrix object
+	 * @param threads number of threads
+	 * @return array of matrix blocks
+	 */
+	private static MatrixBlock[] computeIFFT(MatrixBlock re, MatrixBlock im, int threads) {
+		if(re == null)
+			throw new DMLRuntimeException("Invalid empty block");
+
+		// run ifft
+		if(im != null && !im.isEmptyBlock(false)) {
+			re.sparseToDense();
+			im.sparseToDense();
+			return ifft(re, im, threads);
+		}
+		else {
+			if(re.isEmptyBlock(false)) {
+				// Return the original matrix as the result
+				// Assuming you need to return two matrices: the real part and an imaginary part initialized to 0.
+				return new MatrixBlock[] {re, new MatrixBlock(re.getNumRows(), re.getNumColumns(), true)};
+			}
+			re.sparseToDense();
+			return ifft(re, threads);
+		}
+	}
+
+	/**
+	 * Function to perform IFFT on a given matrix.
+	 *
+	 * @param re      matrix object
+	 * @param threads number of threads
+	 * @return array of matrix blocks
+	 */
+	private static MatrixBlock[] computeIFFT(MatrixBlock re, int threads) {
+		return computeIFFT(re, null, threads);
+	}
+
+	/**
+	 * Function to perform FFT_LINEARIZED on a given matrix.
+	 *
+	 * @param re      matrix object
+	 * @param threads number of threads
+	 * @return array of matrix blocks
+	 */
+	private static MatrixBlock[] computeFFT_LINEARIZED(MatrixBlock re, int threads) {
+		if(re == null)
+			throw new DMLRuntimeException("Invalid empty block");
+		if(re.isEmptyBlock(false)) {
+			// Return the original matrix as the result
+			// Assuming you need to return two matrices: the real part and an imaginary part initialized to 0.
+			return new MatrixBlock[] {re, new MatrixBlock(re.getNumRows(), re.getNumColumns(), true)};
+		}
+		// run fft
+		re.sparseToDense();
+		return fft_linearized(re, threads);
+	}
+
+	/**
+	 * Function to perform IFFT_LINEARIZED on a given matrix.
+	 *
+	 * @param re      matrix object
+	 * @param im      matrix object
+	 * @param threads number of threads
+	 * @return array of matrix blocks
+	 */
+	private static MatrixBlock[] computeIFFT_LINEARIZED(MatrixBlock re, MatrixBlock im, int threads) {
+		if(re == null)
+			throw new DMLRuntimeException("Invalid empty block");
+
+		// run ifft
+		if(im != null && !im.isEmptyBlock(false)) {
+			re.sparseToDense();
+			im.sparseToDense();
+			return ifft_linearized(re, im, threads);
+		}
+		else {
+			if(re.isEmptyBlock(false)) {
+				// Return the original matrix as the result
+				// Assuming you need to return two matrices: the real part and an imaginary part initialized to 0.
+				return new MatrixBlock[] {re, new MatrixBlock(re.getNumRows(), re.getNumColumns(), true)};
+			}
+			re.sparseToDense();
+			return ifft_linearized(re, threads);
+		}
+	}
+
+	/**
+	 * Function to perform IFFT_LINEARIZED on a given matrix
+	 * 
+	 * @param re      matrix object
+	 * @param threads number of threads
+	 * @return array of matrix blocks
+	 */
+	private static MatrixBlock[] computeIFFT_LINEARIZED(MatrixBlock re, int threads) {
+		return computeIFFT_LINEARIZED(re, null, threads);
+	}
+
+
+	// /**
+	//  * Function to perform STFT on a given matrix.
+	//  *
+	//  * @param re matrix object
+	//  * @param im matrix object
+	//  * @param windowSize of stft
+	//  * @param overlap of stft
+	//  * @return array of matrix blocks
+	//  */
+	// private static MatrixBlock[] computeSTFT(MatrixBlock re, MatrixBlock im, int windowSize, int overlap, int threads) {
+	// 	if (re == null) {
+	// 		throw new DMLRuntimeException("Invalid empty block");
+	// 	} else if (im != null && !im.isEmptyBlock(false)) {
+	// 		re.sparseToDense();
+	// 		im.sparseToDense();
+	// 		return stft(re, im, windowSize, overlap, threads);
+	// 	} else {
+	// 		if (re.isEmptyBlock(false)) {
+	// 			// Return the original matrix as the result
+	// 			int rows = re.getNumRows();
+	// 			int cols = re.getNumColumns();
+
+	// 			int stepSize = windowSize - overlap;
+	// 			if (stepSize == 0) {
+	// 				throw new IllegalArgumentException("windowSize - overlap is zero");
+	// 			}
+
+	// 			int numberOfFramesPerRow = (cols - overlap + stepSize - 1) / stepSize;
+	// 			int rowLength= numberOfFramesPerRow * windowSize;
+	// 			int out_len = rowLength * rows;
+
+	// 			double[] out_zero = new double[out_len];
+
+	// 			return new MatrixBlock[]{new MatrixBlock(rows, rowLength, out_zero), new MatrixBlock(rows, rowLength, out_zero)};
+	// 			}
+	// 		re.sparseToDense();
+	// 		return stft(re, windowSize, overlap, threads);
+	// 	}
+	// }
+
+	// /**
+	//  * Function to perform STFT on a given matrix.
+	//  *
+	//  * @param re matrix object
+	//  * @return array of matrix blocks
+	//  */
+	// private static MatrixBlock[] computeSTFT(MatrixBlock re, int windowSize, int overlap, int threads) {
+	// 	return computeSTFT(re, null, windowSize, overlap, threads);
+	// }
+
+	/**
 	 * Performs Singular Value Decomposition. Calls Apache Commons Math SVD.
 	 * X = U * Sigma * Vt, where X is the input matrix,
 	 * U is the left singular matrix, Sigma is the singular values matrix returned as a
@@ -373,15 +603,15 @@ public class LibCommonsMath
 			if(i < m - 1) {
 				w1 = w1.ternaryOperations(op_minus_mul, v1, alpha, new MatrixBlock());
 				w1 = w1.ternaryOperations(op_minus_mul, v0, beta, new MatrixBlock());
-				beta.setValue(0, 0, Math.sqrt(w1.sumSq()));
+				beta.set(0, 0, Math.sqrt(w1.sumSq()));
 				v0.copy(v1);
 				op_div_scalar = op_div_scalar.setConstant(beta.getDouble(0, 0));
 				w1.scalarOperations(op_div_scalar, v1);
 
-				T.setValue(i + 1, i, beta.getValue(0, 0));
-				T.setValue(i, i + 1, beta.getValue(0, 0));
+				T.set(i + 1, i, beta.get(0, 0));
+				T.set(i, i + 1, beta.get(0, 0));
 			}
-			T.setValue(i, i, alpha.getValue(0, 0));
+			T.set(i, i, alpha.get(0, 0));
 		}
 
 		MatrixBlock[] e = computeEigen(T);
@@ -412,7 +642,7 @@ public class LibCommonsMath
 
 		MatrixBlock Q_n = new MatrixBlock(m, m, true);
 		for(int i = 0; i < m; i++) {
-			Q_n.setValue(i, i, 1.0);
+			Q_n.set(i, i, 1.0);
 		}
 
 		ReorgOperator op_t = new ReorgOperator(SwapIndex.getSwapIndexFnObject(), threads);
@@ -425,7 +655,7 @@ public class LibCommonsMath
 			MatrixBlock z = A_n.slice(k, m - 1, k, k);
 			MatrixBlock uk = new MatrixBlock(m - k, 1, 0.0);
 			uk.copy(z);
-			uk.setValue(0, 0, uk.getValue(0, 0) + Math.signum(z.getValue(0, 0)) * Math.sqrt(z.sumSq()));
+			uk.set(0, 0, uk.get(0, 0) + Math.signum(z.get(0, 0)) * Math.sqrt(z.sumSq()));
 			op_div_scalar = op_div_scalar.setConstant(Math.sqrt(uk.sumSq()));
 			uk = uk.scalarOperations(op_div_scalar, new MatrixBlock());
 
@@ -467,7 +697,7 @@ public class LibCommonsMath
 
 		MatrixBlock Q_prod = new MatrixBlock(m, m, 0.0);
 		for(int i = 0; i < m; i++) {
-			Q_prod.setValue(i, i, 1.0);
+			Q_prod.set(i, i, 1.0);
 		}
 
 		for(int i = 0; i < num_iterations; i++) {
@@ -504,7 +734,7 @@ public class LibCommonsMath
 		for(int k = 0; k < m - 2; k++) {
 			MatrixBlock ajk = A_n.slice(0, m - 1, k, k);
 			for(int i = 0; i <= k; i++) {
-				ajk.setValue(i, 0, 0.0);
+				ajk.set(i, 0, 0.0);
 			}
 			double alpha = Math.sqrt(ajk.sumSq());
 			double ak1k = A_n.getDouble(k + 1, k);
@@ -513,13 +743,13 @@ public class LibCommonsMath
 			double r = Math.sqrt(0.5 * (alpha * alpha - ak1k * alpha));
 			MatrixBlock v = new MatrixBlock(m, 1, 0.0);
 			v.copy(ajk);
-			v.setValue(k + 1, 0, ak1k - alpha);
+			v.set(k + 1, 0, ak1k - alpha);
 			ScalarOperator op_div_scalar = new RightScalarOperator(Divide.getDivideFnObject(), 2 * r, threads);
 			v = v.scalarOperations(op_div_scalar, new MatrixBlock());
 
 			MatrixBlock P = new MatrixBlock(m, m, 0.0);
 			for(int i = 0; i < m; i++) {
-				P.setValue(i, i, 1.0);
+				P.set(i, i, 1.0);
 			}
 
 			ReorgOperator op_t = new ReorgOperator(SwapIndex.getSwapIndexFnObject(), threads);
@@ -596,5 +826,126 @@ public class LibCommonsMath
 		MatrixBlock evec = new MatrixBlock(n, n, false);
 		evec.init(eVectors, n, n);
 		return new MatrixBlock[] {eval, evec};
+	}
+	
+	/**
+	 * Performs following operation:
+	 * Computes the intersection ("meet") of equivalence classes for
+	 * each row of A and B, excluding 0-valued cells.
+	 * INPUT:
+	 *   A, B = matrices whose rows contain that row's class labels;
+	 *          for each i, rows A [i, ] and B [i, ] define two
+	 *          equivalence relations on some of the columns, which
+	 *          we want to intersect
+	 *   A [i, j] == A [i, k] != 0 if and only if (j ~ k) as defined
+	 *          by row A [i, ];
+	 *   A [i, j] == 0 means that j is excluded by A [i, ]
+	 *   B [i, j] is analogous
+	 *   NOTE 1: Either nrow(A) == nrow(B), or exactly one of A or B
+	 *   has one row that "applies" to each row of the other matrix.
+	 *   NOTE 2: If ncol(A) != ncol(B), we pad extra 0-columns up to
+	 *   max (ncol(A), ncol(B)).
+	 * OUTPUT:
+	 *   Both C and N have the same size as (the max of) A and B.
+	 *   C = matrix whose rows contain class labels that represent
+	 *       the intersection (coarsest common refinement) of the
+	 *       corresponding rows of A and B.
+	 *   C [i, j] == C [i, k] != 0 if and only if (j ~ k) as defined
+	 *       by both A [i, ] and B [j, ]
+	 *   C [i, j] == 0 if and only if A [i, j] == 0 or B [i, j] == 0
+	 *       Additionally, we guarantee that non-0 labels in C [i, ]
+	 *       will be integers from 1 to max (C [i, ]) without gaps.
+	 *       For A and B the labels can be arbitrary.
+	 *   N = matrix with class-size information for C-cells
+	 *   N [i, j] = count of {C [i, k] | C [i, j] == C [i, k] != 0}
+	 *
+	 * @param A first input matrix
+	 * @param B second input matrix
+	 * @return output matrices C and N
+	 */
+	private static MatrixBlock[] computeRCM(MatrixBlock A, MatrixBlock B) {
+		int nr = Math.max(A.getNumRows(), B.getNumRows());
+		int nc = Math.max(A.getNumColumns(), B.getNumColumns());
+		MatrixBlock C = new MatrixBlock(nr, nc, false).allocateBlock();
+		MatrixBlock N = new MatrixBlock(nr, nc, false).allocateBlock();
+		double[] dC = C.getDenseBlockValues();
+		double[] dN = N.getDenseBlockValues();
+		//wrap both A and B into side inputs for efficient sparse access
+		SideInput sB = CodegenUtils.createSideInput(B);
+		boolean mv = (B.getNumRows() == 1);
+		int numCols = Math.min(A.getNumColumns(), B.getNumColumns());
+
+		Map<ClassLabel, IntArrayList> classLabelMapping = new HashMap<>();
+		for(int i=0, ai=0; i < A.getNumRows(); i++, ai+=A.getNumColumns()) {
+			classLabelMapping.clear(); sB.reset();
+			if( A.isInSparseFormat() ) {
+				if(A.getSparseBlock()==null || A.getSparseBlock().isEmpty(i))
+					continue;
+				int alen = A.getSparseBlock().size(i);
+				int apos = A.getSparseBlock().pos(i);
+				int[] aix = A.getSparseBlock().indexes(i);
+				double[] avals = A.getSparseBlock().values(i);
+				for(int k=apos; k<apos+alen; k++) {
+					if( aix[k] >= numCols ) break;
+					int bval = (int)sB.getValue(mv?0:i, aix[k]);
+					if( bval != 0 ) {
+						ClassLabel key = new ClassLabel((int)avals[k], bval);
+						if(!classLabelMapping.containsKey(key))
+							classLabelMapping.put(key, new IntArrayList());
+						classLabelMapping.get(key).appendValue(aix[k]);
+					}
+				}
+			}
+			else {
+				double [] denseBlk = A.getDenseBlockValues();
+				if(denseBlk == null) break;
+				for(int j = 0; j < numCols; j++) {
+					int aVal = (int) denseBlk[ai+j];
+					int bVal = (int) sB.getValue(mv?0:i, j);
+					if(aVal != 0 && bVal != 0) {
+						ClassLabel key = new ClassLabel(aVal, bVal);
+						if(!classLabelMapping.containsKey(key))
+							classLabelMapping.put(key, new IntArrayList());
+						classLabelMapping.get(key).appendValue(j);
+					}
+				}
+			}
+
+			int labelID = 1;
+			for(Entry<ClassLabel, IntArrayList> entry : classLabelMapping.entrySet()) {
+				int nVal = entry.getValue().size();
+				int[] list = entry.getValue().extractValues();
+				for(int k=0, off=i*nc; k<nVal; k++) {
+					dN[off+list[k]] = nVal;
+					dC[off+list[k]] = labelID;
+				}
+				labelID++;
+			}
+		}
+
+		//prepare outputs
+		C.recomputeNonZeros(); C.examSparsity();
+		N.recomputeNonZeros(); N.examSparsity();
+		return new MatrixBlock[] {C, N};
+	}
+	
+	private static class ClassLabel {
+		public int aVal;
+		public int bVal;
+		public ClassLabel(int aVal, int bVal) {
+			this.aVal = aVal;
+			this.bVal = bVal;
+		}
+		@Override
+		public int hashCode() {
+			return UtilFunctions.intHashCode(aVal, bVal);
+		}
+		@Override
+		public boolean equals(Object o) {
+			if( !(o instanceof ClassLabel) )
+				return false;
+			ClassLabel that = (ClassLabel) o;
+			return aVal == that.aVal && bVal == that.bVal;
+		}
 	}
 }

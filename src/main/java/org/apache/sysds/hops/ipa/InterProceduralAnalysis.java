@@ -102,7 +102,7 @@ public class InterProceduralAnalysis {
 	private FunctionCallGraph _fgraph;
 	
 	//set IPA passes to apply in order 
-	private final ArrayList<IPAPass> _passes;
+	private final List<IPAPass> _passes;
 
 	/**
 	 * Creates a handle for performing inter-procedural analysis
@@ -266,7 +266,7 @@ public class InterProceduralAnalysis {
 		//check size-preserving characteristic
 		if( ret ) {
 			FunctionCallSizeInfo fcallSizes = new FunctionCallSizeInfo(_fgraph, false);
-			HashSet<String> fnStack = new HashSet<>();
+			Set<String> fnStack = new HashSet<>();
 			LocalVariableMap callVars = new LocalVariableMap();
 			
 			//populate input (recognizable numbers, later reset)
@@ -366,7 +366,7 @@ public class InterProceduralAnalysis {
 			//remove updated constant scalars
 			Recompiler.removeUpdatedScalars(callVars, sb);
 			//old stats in, new stats out if updated
-			ArrayList<Hop> roots = sb.getHops();
+			List<Hop> roots = sb.getHops();
 			DMLProgram prog = sb.getDMLProg();
 			//replace scalar reads with literals
 			if( replaceScalars ) {
@@ -396,7 +396,7 @@ public class InterProceduralAnalysis {
 	 * @param roots  List of HOPs.
 	 * @param vars  Map of variables eligible for propagation.
 	 */
-	private static void propagateScalarsAcrossDAG(ArrayList<Hop> roots, LocalVariableMap vars) {
+	private static void propagateScalarsAcrossDAG(List<Hop> roots, LocalVariableMap vars) {
 		for (Hop hop : roots) {
 			try {
 				Recompiler.rReplaceLiterals(hop, vars, true);
@@ -428,7 +428,7 @@ public class InterProceduralAnalysis {
 	 * @param roots  List of HOP DAG root nodes.
 	 * @param vars  Map of variables eligible for propagation.
 	 */
-	private static void propagateStatisticsAcrossDAG( ArrayList<Hop> roots, LocalVariableMap vars ) {
+	private static void propagateStatisticsAcrossDAG( List<Hop> roots, LocalVariableMap vars ) {
 		if( roots == null )
 			return;
 		
@@ -460,7 +460,7 @@ public class InterProceduralAnalysis {
 	 * @param fcallSizes function call summary
 	 * @param fnStack  Function stack to determine current scope.
 	 */
-	private void propagateStatisticsIntoFunctions(DMLProgram prog, ArrayList<Hop> roots, LocalVariableMap callVars, FunctionCallSizeInfo fcallSizes, Set<String> fnStack, boolean replaceScalars) {
+	private void propagateStatisticsIntoFunctions(DMLProgram prog, List<Hop> roots, LocalVariableMap callVars, FunctionCallSizeInfo fcallSizes, Set<String> fnStack, boolean replaceScalars) {
 		for( Hop root : roots )
 			propagateStatisticsIntoFunctions(prog, root, callVars, fcallSizes, fnStack, replaceScalars);
 	}
@@ -530,7 +530,7 @@ public class InterProceduralAnalysis {
 		//note: due to arbitrary binding sequences of named function arguments,
 		//we cannot use the sequence as defined in the function signature
 		String[] funArgNames = fop.getInputVariableNames();
-		ArrayList<Hop> inputOps = fop.getInput();
+		List<Hop> inputOps = fop.getInput();
 		String fkey = fop.getFunctionKey();
 		
 		//iterate over all parameters (with robustness for missing parameters)
@@ -542,7 +542,7 @@ public class InterProceduralAnalysis {
 					+ "does not exist in function signature of "+fop.getFunctionKey()+".");
 			Hop input = inputOps.get(i);
 			
-			if( input.getDataType()==DataType.MATRIX )
+			if( !input.getDataType().isScalar() ) //matrix/frame/list/tensor
 			{
 				//propagate matrix characteristics
 				MatrixObject mo = new MatrixObject(ValueType.FP64, null);
@@ -589,7 +589,7 @@ public class InterProceduralAnalysis {
 	 *                      calling program's variable map.
 	 */
 	private static void extractFunctionCallReturnStatistics( FunctionStatement fstmt, FunctionOp fop, LocalVariableMap tmpVars, LocalVariableMap callVars, boolean overwrite ) {
-		ArrayList<DataIdentifier> foutputOps = fstmt.getOutputParams();
+		List<DataIdentifier> foutputOps = fstmt.getOutputParams();
 		String[] outputVars = fop.getOutputVariableNames();
 		String fkey = fop.getFunctionKey();
 		
@@ -617,7 +617,8 @@ public class InterProceduralAnalysis {
 					}
 				}
 				// Update or add to the calling program's variable map.
-				if( di.getDataType()==DataType.MATRIX && tmpVars.keySet().contains(fvarname) ) {
+				// for matrices, frames, lists, and tensors
+				if( !di.getDataType().isScalar() && tmpVars.keySet().contains(fvarname) ) {
 					MatrixObject moIn = (MatrixObject) tmpVars.get(fvarname);
 					if( !callVars.keySet().contains(pvarname) || overwrite ) { //not existing so far
 						MatrixObject moOut = createOutputMatrix(moIn.getNumRows(), moIn.getNumColumns(), moIn.getNnz());
@@ -647,7 +648,7 @@ public class InterProceduralAnalysis {
 	}
 	
 	private static void extractFunctionCallUnknownReturnStatistics(FunctionStatement fstmt, FunctionOp fop, LocalVariableMap callVars) {
-		ArrayList<DataIdentifier> foutputOps = fstmt.getOutputParams();
+		List<DataIdentifier> foutputOps = fstmt.getOutputParams();
 		String[] outputVars = fop.getOutputVariableNames();
 		String fkey = fop.getFunctionKey();
 		try {

@@ -19,6 +19,15 @@
 
 package org.apache.sysds.runtime.iogen;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+
 import org.apache.sysds.common.Types;
 import org.apache.sysds.hops.OptimizerUtils;
 import org.apache.sysds.runtime.frame.data.FrameBlock;
@@ -27,16 +36,6 @@ import org.apache.sysds.runtime.matrix.data.MatrixBlock;
 import org.apache.sysds.runtime.matrix.data.Pair;
 import org.apache.sysds.runtime.util.CommonThreadPool;
 import org.apache.sysds.runtime.util.UtilFunctions;
-
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 
 public class ReaderMappingIndex {
 	private int[][] mapRow;
@@ -94,8 +93,8 @@ public class ReaderMappingIndex {
 		this.nlines = rawList.size();
 		this.sampleRawIndexes = new RawIndex[this.nlines];
 		int numThreads = OptimizerUtils.getParallelTextWriteParallelism();
+		ExecutorService pool = CommonThreadPool.get(numThreads);
 		try {
-			ExecutorService pool = CommonThreadPool.get(numThreads);
 			ArrayList<BuildRawIndexTask> tasks = new ArrayList<>();
 			int blklen = (int) Math.ceil((double) nlines / numThreads);
 			for(int i = 0; i < numThreads; i++) {
@@ -103,16 +102,15 @@ public class ReaderMappingIndex {
 				int endIndex = Math.min((i + 1) * blklen, nlines);
 				tasks.add(new BuildRawIndexTask(rawList, this.sampleRawIndexes, beginIndex, endIndex));
 			}
-			//wait until all tasks have been executed
-			List<Future<Object>> rt = pool.invokeAll(tasks);
-			pool.shutdown();
 
-			//check for exceptions
-			for(Future<Object> task : rt)
+			for(Future<Object> task : pool.invokeAll(tasks))
 				task.get();
 		}
 		catch(Exception e) {
 			throw new RuntimeException("Failed parallel ReadRaw.", e);
+		}
+		finally{
+			pool.shutdown();
 		}
 
 	}
@@ -137,7 +135,7 @@ public class ReaderMappingIndex {
 					HashSet<Integer> checkedLines = new HashSet<>();
 					while(checkedLines.size() < nlines) {
 						RawIndex ri = this.sampleRawIndexes[itRow];
-						Pair<Integer, Integer> pair = this.isMatrix ? ri.findValue(this.sampleMatrix.getValue(r, c)) : ri.findValue(this.sampleFrame.get(r, c), this.schema[c]);
+						Pair<Integer, Integer> pair = this.isMatrix ? ri.findValue(this.sampleMatrix.get(r, c)) : ri.findValue(this.sampleFrame.get(r, c), this.schema[c]);
 						if(pair != null) {
 							this.mapRow[r][c] = itRow;
 							this.mapCol[r][c] = pair.getKey();
@@ -277,7 +275,7 @@ public class ReaderMappingIndex {
 					if(this.isMatrix) {
 						HashSet<Double> patternValueSet = new HashSet<>();
 						for(int c = 0; c < ncols; c++)
-							patternValueSet.add(this.sampleMatrix.getValue(r, c));
+							patternValueSet.add(this.sampleMatrix.get(r, c));
 						if(patternValueSet.size() == 1) {
 							vtc0 = Types.ValueType.FP64;
 							patternMap = true;
@@ -306,7 +304,7 @@ public class ReaderMappingIndex {
 	private boolean checkValueIsNotNullZero(int r, int c) {
 		boolean result;
 		if(this.isMatrix)
-			result = this.sampleMatrix.getValue(r, c) != 0;
+			result = this.sampleMatrix.get(r, c) != 0;
 		else {
 			if(this.sampleFrame.getSchema()[c].isNumeric())
 				result = this.sampleFrame.getDouble(r, c) != 0;
@@ -320,7 +318,7 @@ public class ReaderMappingIndex {
 	private boolean checkSymmetricValue(int r, int c, int a) {
 		boolean result;
 		if(this.isMatrix)
-			result = this.sampleMatrix.getValue(r, c) == this.sampleMatrix.getValue(c, r) * a;
+			result = this.sampleMatrix.get(r, c) == this.sampleMatrix.get(c, r) * a;
 		else if(this.sampleFrame.getSchema()[c].isNumeric())
 			result = this.sampleFrame.getDouble(r, c) == this.sampleFrame.getDouble(c, r) * a;
 		else
@@ -368,7 +366,7 @@ public class ReaderMappingIndex {
 	public boolean compareCellValue (int r, int c, String value){
 		if(isMatrix)
 			try {
-				return sampleMatrix.getValue(r, c) == UtilFunctions.objectToDouble(Types.ValueType.FP64, value);
+				return sampleMatrix.get(r, c) == UtilFunctions.objectToDouble(Types.ValueType.FP64, value);
 			}
 			catch(Exception exception){
 				return false;
