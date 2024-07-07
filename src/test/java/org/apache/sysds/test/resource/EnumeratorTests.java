@@ -1,4 +1,4 @@
-package org.apache.sysds.test.ropt;
+package org.apache.sysds.test.resource;
 
 import java.lang.reflect.Field;
 import java.util.HashMap;
@@ -12,7 +12,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 
-import static org.apache.sysds.test.ropt.TestingUtils.getSimpleCloudInstanceMap;
+import static org.apache.sysds.test.resource.TestingUtils.getSimpleCloudInstanceMap;
 
 @SuppressWarnings("unchecked")
 public class EnumeratorTests {

@@ -1,4 +1,4 @@
-package org.apache.sysds.test.ropt;
+package org.apache.sysds.test.resource;
 
 import org.apache.sysds.resource.enumeration.CloudInstance;
 import org.junit.Assert;

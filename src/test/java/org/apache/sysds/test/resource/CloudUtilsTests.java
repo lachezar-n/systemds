@@ -1,4 +1,4 @@
-package org.apache.sysds.test.ropt;
+package org.apache.sysds.test.resource;
 
 import org.apache.sysds.resource.enumeration.AWSUtils;
 import org.apache.sysds.resource.enumeration.CloudInstance;
@@ -11,8 +11,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 
-import static org.apache.sysds.test.ropt.TestingUtils.assertEqualsCloudInstances;
-import static org.apache.sysds.test.ropt.TestingUtils.getSimpleCloudInstanceMap;
+import static org.apache.sysds.test.resource.TestingUtils.assertEqualsCloudInstances;
+import static org.apache.sysds.test.resource.TestingUtils.getSimpleCloudInstanceMap;
 
 public class CloudUtilsTests {
     @Test
