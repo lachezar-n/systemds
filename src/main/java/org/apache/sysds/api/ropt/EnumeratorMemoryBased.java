@@ -1,4 +1,4 @@
-package org.apache.sysds.api.ropt.new_impl;
+package org.apache.sysds.api.ropt;
 
 public class EnumeratorMemoryBased extends Enumerator {
     public EnumeratorMemoryBased(Builder builder) {
@@ -6,7 +6,7 @@ public class EnumeratorMemoryBased extends Enumerator {
     }
 
     @Override
-    protected ConfigurationPoint enumerate() {
+    protected SolutionPoint enumerate() {
         return null;
     }
 }

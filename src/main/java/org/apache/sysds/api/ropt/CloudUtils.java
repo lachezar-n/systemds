@@ -1,7 +1,4 @@
-package org.apache.sysds.api.ropt.new_impl;
-
-import org.apache.sysds.api.ropt.new_impl.CloudInstance;
-import org.checkerframework.checker.units.qual.C;
+package org.apache.sysds.api.ropt;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -48,30 +45,32 @@ public abstract class CloudUtils {
         String parsedLine;
         // validate the file header
         parsedLine = br.readLine();
-        if (!parsedLine.equals("API_Name,Memory,vCPUs,Family,Price,gFlops,diskSpeed,ramSpeed"))
+        if (!parsedLine.equals("API_Name,Memory,vCPUs,Family,Price,gFlops,ramSpeed,diskSpeed,networkSpeed"))
             throw new IOException("Invalid CSV header inside: " + instanceTablePath);
 
 
         while ((parsedLine = br.readLine()) != null) {
             String[] values = parsedLine.split(",");
-            if (values.length != 8 && validateInstanceName(values[0]))
+            if (values.length != 8 || !validateInstanceName(values[0]))
                 throw new IOException(String.format("Invalid CSV line(%d) inside: %s", lineCount, instanceTablePath));
 
             String API_Name = values[0];
             long Memory = (long)Double.parseDouble(values[1])*1024;
             int vCPUs = Integer.parseInt(values[2]);
-            double Price = Double.parseDouble(values[4]);
-            double gFlops = Double.parseDouble(values[5]);
-            double diskSpeed = Double.parseDouble(values[6]);
-            double ramSpeed = Double.parseDouble(values[7]);
+            double gFlops = Double.parseDouble(values[3]);
+            double ramSpeed = Double.parseDouble(values[4]);
+            double diskSpeed = Double.parseDouble(values[5]);
+            double networkSpeed = Double.parseDouble(values[6]);
+            double Price = Double.parseDouble(values[7]);
 
             CloudInstance parsedInstance = new CloudInstance(
                     API_Name,
                     Memory,
                     vCPUs,
                     gFlops,
-                    diskSpeed,
                     ramSpeed,
+                    diskSpeed,
+                    networkSpeed,
                     Price
             );
             result.put(API_Name, parsedInstance);

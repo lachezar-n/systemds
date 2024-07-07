@@ -1,64 +1,97 @@
 package org.apache.sysds.api.ropt;
 
+import org.apache.sysds.runtime.controlprogram.context.SparkExecutionContext;
 
 /**
  * This class describes the configurations of a single VM instance.
+ * The idea is to use this class to represent instances of different
+ * cloud hypervisors - currently supporting only EC2 instances by AWS.
  */
 public class CloudInstance {
     private final String instanceName;
     private final long memoryMB;
     private final int vCPUCores;
-    private int numGPUs; // NOTE: to be used in the future
     private final double pricePerHour;
     private final double gFlops;
-
-    public CloudInstance(String instanceName, long memoryMB, int vCPUCores, double pricePerHour, double gFlops) {
-        if (!instanceName.matches(AWSUtils.EC2_REGEX))
-            throw new RuntimeException(instanceName+" is not a valid instance name");
+    private final double memorySpeed;
+    private final double diskSpeed;
+    private final double networkSpeed;
+    public CloudInstance(String instanceName, long memoryMB, int vCPUCores, double gFlops, double memorySpeed, double diskSpeed, double networkSpeed, double pricePerHour) {
         this.instanceName = instanceName;
         this.memoryMB = memoryMB;
         this.vCPUCores = vCPUCores;
-        // NOT relevant for now
-        this.numGPUs = 0;
-        this.pricePerHour = pricePerHour;
         this.gFlops = gFlops;
+        this.memorySpeed = memorySpeed;
+        this.diskSpeed = diskSpeed;
+        this.networkSpeed = networkSpeed;
+        this.pricePerHour = pricePerHour;
     }
 
     public String getInstanceName() {
         return instanceName;
     }
 
-    public String getInstanceType() {
-        return instanceName.split("\\.")[0];
-    }
-
-    public String getInstanceSize() {
-        return instanceName.split("\\.")[1];
-    }
-    public long getMemoryMB() {
+    /**
+     * Returns the memory of the instance in MB.
+     * @return
+     */
+    public long getMemory() {
         return memoryMB;
     }
 
-    public long getAvailableMemoryMB() {
-        // NOTE: reconsider the usage of MEM_FACTOR
-        return (long) (memoryMB/ CloudOptimizerUtils.MEM_FACTOR);
-    }
-
-    public int getVCPUCores() {
-        return vCPUCores;
-    }
-
-
-    public double getPricePerHour() {
-        return pricePerHour;
-    }
-
-    public long getFLOPS() {
-        return (long) (gFlops*1024)*1024*1024;
-    }
-
+    /**
+     * Returns the memory per core of the instance in MB.
+     * @return
+     */
     public long getMemoryPerCore() {
         return memoryMB/vCPUCores;
     }
 
+    /**
+     * Returns the number of virtual CPU cores of the instance.
+     * @return
+     */
+    public int getVCPUs() {
+        return vCPUCores;
+    }
+
+    /**
+     * Returns the price per hour of the instance.
+     * @return
+     */
+    public double getPrice() {
+        return pricePerHour;
+    }
+
+    /**
+     * Returns the number of FLOPS of the instance.
+     * @return
+     */
+    public long getFLOPS() {
+        return (long) (gFlops*1024)*1024*1024;
+    }
+
+    /**
+     * Returns the memory speed/bandwidth of the instance in MB/s.
+     * @return
+     */
+    public double getMemorySpeed() {
+        return memorySpeed;
+    }
+
+    /**
+     * Returns the disk speed/bandwidth of the instance in MB/s.
+     * @return
+     */
+    public double getDiskSpeed() {
+        return diskSpeed;
+    }
+
+    /**
+     * Returns the network speed/bandwidth of the instance in MB/s.
+     * @return
+     */
+    public double getNetworkSpeed() {
+        return networkSpeed;
+    }
 }
