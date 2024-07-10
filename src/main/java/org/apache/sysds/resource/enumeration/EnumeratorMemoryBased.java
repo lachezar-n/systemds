@@ -27,10 +27,54 @@ public class EnumeratorMemoryBased extends Enumerator {
                 Double.MAX_VALUE
         );
 
-        List<Long> memoryPointsCP = new ArrayList<>(searchSpace.driverSpace.keySet());
-        List<Long> memoryPointsSpark = searchSpace.executorSpace.keySet().stream()
-                .map(distributedMem -> distributedMem._1).distinct().collect(Collectors.toList());
+        List<Long> availableNodesMemory = new ArrayList<>(searchSpace.keySet());
+        // extract relevant (based on memory estimates) memory points for enumeration driver configs
         List<Long> estimatesForCp = getMemoryEstimateCP(program.getProgramBlocks());
+        List<Long> driverMemoryPoints = getMemoryPoints(estimatesForCp, availableNodesMemory);
+        // extract relevant (based on memory estimates) memory points for enumeration executors configs
+        List<Long> estimatesForSpark = getMemoryEstimateSpark(program.getProgramBlocks());
+        List<Long> executorMemoryPoints = getMemoryPoints(estimatesForSpark, availableNodesMemory);
+        // get the largest memory estimates for further reducing the enumeration space
+        long maxEstimate = estimatesForCp.stream().max(Long::compareTo).orElse(0L);
+
+        for (long dMemory: driverMemoryPoints) {
+            // loop over the relevant driver memory configurations
+            for (InstanceNode dNode: searchSpace.get(dMemory)) {
+                setDriverConfigurations(dMemory, dNode._1);
+                // enumeration for single node execution only in case CP has enough memory for all estimates
+                if (maxExecutors == 0 && dMemory > maxEstimate) {
+                    setExecutorConfigurations(0, -1, -1);
+                    // TODO: full recompilation in single node mode
+                    Enumerator.ConfigurationPoint newPoint = new ConfigurationPoint(dNode._2, null, 0);
+                    // cost estimation
+                    double[] cost = getCostEstimate(newPoint);
+                    // update optimal solution if better configuration point found
+                    updateOptimalSolution(optSolutionPoint, newPoint, cost[0], cost[1]);
+                }
+                // dummy "minimal" configuration used to trigger generation hybrid plan
+                setExecutorConfigurations(1, 512*1024*1024, 1);
+                // TODO: full recompile to establish the execution type of each operation
+                // get all relevant memory points for enumeration
+                for (int n = Math.min(minExecutors, 1); n <= maxExecutors; n+=1) {
+                    for (long eMemory: executorMemoryPoints) {
+                        // loop over the relevant executor memory configurations
+                        if ((n * eMemory) < maxExecutors) {
+                            // skip enumeration of a point that would not have sufficient distributed memory
+                            continue;
+                        }
+                        for (InstanceNode eNode: searchSpace.get(eMemory)) {
+                            setExecutorConfigurations(n, eMemory, eNode._1);
+                            // TODO: recompile only Spark blocks
+                            Enumerator.ConfigurationPoint newPoint = new ConfigurationPoint(dNode._2, eNode._2, n);
+                            // cost estimation
+                            double[] cost = getCostEstimate(newPoint);
+                            // update optimal solution if better configuration point found
+                            updateOptimalSolution(optSolutionPoint, newPoint, cost[0], cost[1]);
+                        }
+                    }
+                }
+            }
+        }
 
         return optSolutionPoint;
     }

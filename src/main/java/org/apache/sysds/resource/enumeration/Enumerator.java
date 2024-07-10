@@ -24,7 +24,12 @@ public abstract class Enumerator {
      * evaluating cluster configurations that most probably would
      * have too high distribution overhead
      */
-    private static final int UPPER_BOUND_NUM_EXECUTORS = 200;
+    protected static final int UPPER_BOUND_NUM_EXECUTORS = 200;
+    /**
+     * {@code CloudInstance} object to be used only for initial recompilation.
+     * It should not be used for cost estimation.
+     */
+    static final CloudInstance minimalInstance = new CloudInstance("dummy", 512*1024*1024, 1, -1, -1, -1, -1, Double.MAX_VALUE);
     public enum EnumerationStrategy {
         RangeBased, // considering all combination within a given range of configuration
         MemoryBased, // considering only combinations of configurations with memory budge close to memory estimates
@@ -110,7 +115,7 @@ public abstract class Enumerator {
         InfrastructureAnalyzer.setLocalPar(nodeNumCores);
     }
 
-    protected static void setExecutorConfigurations(long nodeMemory, int numExecutors, int nodeNumCores) {
+    protected static void setExecutorConfigurations(int numExecutors, long nodeMemory, int nodeNumCores) {
         // TODO: think of reasonable factor for the JVM heap as prt of the node's memory
         if (numExecutors > 0) {
             DMLScript.setGlobalExecMode(Types.ExecMode.HYBRID);
@@ -272,112 +277,24 @@ public abstract class Enumerator {
     }
 
     /**
-     * Data structure representing the whole search space for SystemDS cluster configurations.
-     * This search space has 4 dimensions and on higher abstraction level it can be represented
-     * in 2 dimensions with 2 hyperparameters each:
-     * <li>search space for CP (Spark driver) node's configurations ({@code driverSpace}):
-     *  mapping node's memory (1. parameter) to the corresponding number of CPU cores (2. parameter)
-     *  bind to a {@code CloudInstance} object</li>
-     * <li>search space for distributed (Spark executor) nodes' configurations ({@code executorSpace}):
-     *  mapping node's memory bind to number of executors, representing the total distributed memory, (3. parameter)
-     *  to the corresponding number of CPU cores (4. parameter) bind to a {@code CloudInstance} object</li>
-     * <li>Ascending ordered 2-D data structures - {@code driverSpace} and {@code executorSpace}:
-     * {@code TreeMap} ensures the ordering of the first dimension (keys) and the order
-     * of the second dimension (values) must be kept constantly at adding new elements
-     * to the corresponding lists</li>
+     * Data structure representing the search space for VM instances
+     * as node's memory mapped to list of {@code InstanceNode}
+     * objects carrying the numbers of cores for particular VM instance
+     * having the same memory resource and a corresponding
+     * VM instance object ({@code CloudInstance}).
+     * This representation allows compact storing of VM instance
+     * characteristics relevant for program compilation while
+     * still keeping a reference to the object carrying the
+     * whole instance information, relevant for cost estimation.
      */
-    public static class SearchSpace {
-        TreeMap<Long, LinkedList<InstanceNode>> driverSpace;
-        TreeMap<DistributedMemory, LinkedList<InstanceNode>> executorSpace;
-
-        public SearchSpace() {
-            this.driverSpace = new TreeMap<>();
-            this.executorSpace = new TreeMap<>();
-        }
-
-        public void initSpace(HashMap<String, CloudInstance> instances) {
-            initSpace(instances, 0, UPPER_BOUND_NUM_EXECUTORS);
-        }
-
-        void initSpace(HashMap<String, CloudInstance> instances, int minExecutors, int maxExecutors) {
-            initDriverSpace(instances);
-            initExecutorSpace(instances,minExecutors, maxExecutors);
-        }
-
-        void initDriverSpace(HashMap<String, CloudInstance> instances) {
+    public static class SearchSpace extends TreeMap<Long, LinkedList<InstanceNode>> {
+        void initSpace(HashMap<String, CloudInstance> instances) {
             for (CloudInstance instance: instances.values()) {
                 long currentMemory = instance.getMemory();
-                LinkedList<InstanceNode> currentList = driverSpace.getOrDefault(currentMemory, new LinkedList<>());
-                driverSpace.putIfAbsent(currentMemory, currentList);
+                LinkedList<InstanceNode> currentList = this.getOrDefault(currentMemory, new LinkedList<>());
+                this.putIfAbsent(currentMemory, currentList);
                 InstanceNode.appendInstance(instance, currentList);
             }
-        }
-
-        void initExecutorSpace(HashMap<String, CloudInstance> instances, int minNumber, int maxNumber) {
-            if (minNumber < 0 || maxNumber <= minNumber || maxNumber > UPPER_BOUND_NUM_EXECUTORS) {
-                throw new IllegalArgumentException("Given range for number of execurtors is not valid. " +
-                        "It should fit in [0, " + UPPER_BOUND_NUM_EXECUTORS + "]");
-            }
-            if (minNumber == 0) {
-                DistributedMemory zeroKey = new DistributedMemory(-1L, 0);
-                executorSpace.put(zeroKey, null); // TODO: consider if there is a better approach for 0 executors (single node execution)
-            }
-            for (int n = 1; n <= maxNumber; n++) {
-                for (CloudInstance instance: instances.values()) {
-                    long currentMemory = instance.getMemory();
-                    DistributedMemory currentKey = new DistributedMemory(currentMemory, n);
-                    LinkedList<InstanceNode> currentList = executorSpace.getOrDefault(currentKey, new LinkedList<>());
-                    executorSpace.putIfAbsent(currentKey, currentList);
-                    InstanceNode.appendInstance(instance, currentList);
-                }
-            }
-        }
-//        public static LinkedList<Tuple3<Long, Integer, CloudInstance>> flattenDriverEntry(Map.Entry<Long, LinkedList<InstanceNode>> entry) {
-//            LinkedList<Tuple3<Long, Integer, CloudInstance>> result = new LinkedList<>();
-//            for (InstanceNode node: entry.getValue()) {
-//                Tuple3<Long, Integer, CloudInstance> newTuple = new Tuple3<>(entry.getKey(), node._1, node._2);
-//                result.add(newTuple);
-//            }
-//            return result;
-//        }
-//
-//
-//        public static LinkedList<Tuple4<Long, Integer, Integer, CloudInstance>> flattenExecutorEntry(Map.Entry<DistributedMemory, LinkedList<InstanceNode>> entry) {
-//            LinkedList<Tuple4<Long, Integer, Integer, CloudInstance>> result = new LinkedList<>();
-//            for (InstanceNode node: entry.getValue()) {
-//                Tuple4<Long, Integer, Integer, CloudInstance> newTuple = new Tuple4<>(
-//                        entry.getKey()._1,
-//                        entry.getKey()._2,
-//                        node._1,
-//                        node._2
-//                );
-//                result.add(newTuple);
-//            }
-//            return result;
-//        }
-    }
-
-    /**
-     *
-     * @_1 - node memory in MB
-     * @_2 - number of executor nodes
-     */
-    static class DistributedMemory extends Tuple2<Long, Integer> implements Comparable<DistributedMemory>{
-
-        public DistributedMemory(Long _1, Integer _2) {
-            super(_1, _2);
-        }
-
-        @Override
-        public int compareTo(@NotNull Enumerator.DistributedMemory o) {
-            long o1TotalMemory = this._1 * this._2;
-            long o2TotalMemory = o._1 * o._2;
-            int totalMemoryComparison = Long.compare(o1TotalMemory, o2TotalMemory);
-            if (totalMemoryComparison != 0) {
-                return totalMemoryComparison;
-            }
-            // further comparison based on the number of executors
-            return Integer.compare(this._2, o._2);
         }
     }
 
@@ -434,6 +351,52 @@ public abstract class Enumerator {
     // -----------------------------------------------------------------------------------------------------------------
     // OLD - TODO: delete after the implementation is stable
 
+//    /**
+//     *
+//     * @_1 - node memory in MB
+//     * @_2 - number of executor nodes
+//     */
+//    static class DistributedMemory extends Tuple2<Long, Integer> implements Comparable<DistributedMemory>{
+//
+//        public DistributedMemory(Long _1, Integer _2) {
+//            super(_1, _2);
+//        }
+//
+//        @Override
+//        public int compareTo(@NotNull Enumerator.DistributedMemory o) {
+//            long o1TotalMemory = this._1 * this._2;
+//            long o2TotalMemory = o._1 * o._2;
+//            int totalMemoryComparison = Long.compare(o1TotalMemory, o2TotalMemory);
+//            if (totalMemoryComparison != 0) {
+//                return totalMemoryComparison;
+//            }
+//            // further comparison based on the number of executors
+//            return Integer.compare(this._2, o._2);
+//        }
+//    }
+//        public static LinkedList<Tuple3<Long, Integer, CloudInstance>> flattenDriverEntry(Map.Entry<Long, LinkedList<InstanceNode>> entry) {
+//            LinkedList<Tuple3<Long, Integer, CloudInstance>> result = new LinkedList<>();
+//            for (InstanceNode node: entry.getValue()) {
+//                Tuple3<Long, Integer, CloudInstance> newTuple = new Tuple3<>(entry.getKey(), node._1, node._2);
+//                result.add(newTuple);
+//            }
+//            return result;
+//        }
+//
+//
+//        public static LinkedList<Tuple4<Long, Integer, Integer, CloudInstance>> flattenExecutorEntry(Map.Entry<DistributedMemory, LinkedList<InstanceNode>> entry) {
+//            LinkedList<Tuple4<Long, Integer, Integer, CloudInstance>> result = new LinkedList<>();
+//            for (InstanceNode node: entry.getValue()) {
+//                Tuple4<Long, Integer, Integer, CloudInstance> newTuple = new Tuple4<>(
+//                        entry.getKey()._1,
+//                        entry.getKey()._2,
+//                        node._1,
+//                        node._2
+//                );
+//                result.add(newTuple);
+//            }
+//            return result;
+//        }
 //    static class DriverSpace {
 //        /**
 //         * <p>key: memory in MB</p>
