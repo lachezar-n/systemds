@@ -5,13 +5,13 @@ import java.util.Map;
 
 public class EnumeratorGridBased extends Enumerator {
     private int stepSize;
-    public EnumeratorGridBased(Builder builder) {
+    public EnumeratorGridBased(Builder builder, int stepSize) {
         super(builder);
-        stepSize = 1; // default
+        this.stepSize = stepSize;
     }
 
     @Override
-    protected SolutionPoint enumerate() {
+    public SolutionPoint enumerate() {
         SearchSpace searchSpace = new SearchSpace();
         searchSpace.initSpace(instances);
         SolutionPoint optSolutionPoint = new SolutionPoint(

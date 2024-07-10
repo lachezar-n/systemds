@@ -1,7 +1,5 @@
 package org.apache.sysds.resource.enumeration;
 
-import org.apache.sysds.runtime.controlprogram.context.SparkExecutionContext;
-
 /**
  * This class describes the configurations of a single VM instance.
  * The idea is to use this class to represent instances of different
@@ -9,7 +7,7 @@ import org.apache.sysds.runtime.controlprogram.context.SparkExecutionContext;
  */
 public class CloudInstance {
     private final String instanceName;
-    private final long memoryMB;
+    private final long memory;
     private final int vCPUCores;
     private final double pricePerHour;
     private final double gFlops;
@@ -18,7 +16,7 @@ public class CloudInstance {
     private final double networkSpeed;
     public CloudInstance(String instanceName, long memoryMB, int vCPUCores, double gFlops, double memorySpeed, double diskSpeed, double networkSpeed, double pricePerHour) {
         this.instanceName = instanceName;
-        this.memoryMB = memoryMB;
+        this.memory = memoryMB * 1024 * 1024;
         this.vCPUCores = vCPUCores;
         this.gFlops = gFlops;
         this.memorySpeed = memorySpeed;
@@ -36,7 +34,7 @@ public class CloudInstance {
      * @return
      */
     public long getMemory() {
-        return memoryMB;
+        return memory;
     }
 
     /**
@@ -44,7 +42,7 @@ public class CloudInstance {
      * @return
      */
     public long getMemoryPerCore() {
-        return memoryMB/vCPUCores;
+        return memory /vCPUCores;
     }
 
     /**

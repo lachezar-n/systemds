@@ -25,10 +25,6 @@ public abstract class CloudUtils {
     public abstract String getInstanceType(String instanceName);
     public abstract String getInstanceSize(String instanceName);
 
-    public abstract InstanceType getTypeEnum(String s);
-
-    public abstract InstanceSize getSizeEnum(String s);
-
     /**
      * This method calculates the cluster price based on the
      * estimated execution time and the cluster configuration.
@@ -38,6 +34,21 @@ public abstract class CloudUtils {
      */
     public abstract double calculateClusterPrice(Enumerator.ConfigurationPoint config, double time);
 
+    /**
+     * Performs read of csv file filled with VM instance characteristics.
+     * Each record in the csv should carry the following information (including header):
+     * <li>API_Name - naming for VM instance used by the provider</li>
+     * <li>Memory - floating number for the instance memory in GBs</li>
+     * <li>vCPUs - number of physical threads</li>
+     * <li>gFlops - FLOPS capability of the CPU in GFLOPS (Giga)</li>
+     * <li>ramSpeed - memory bandwidth in MB/s</li>
+     * <li>diskSpeed - memory bandwidth in MB/s</li>
+     * <li>networkSpeed - memory bandwidth in MB/s</li>
+     * <li>Price - price for instance per hour</li>
+     * @param instanceTablePath
+     * @return
+     * @throws IOException
+     */
     public HashMap<String, CloudInstance> loadInstanceInfoTable(String instanceTablePath) throws IOException {
         HashMap<String, CloudInstance> result = new HashMap<>();
         int lineCount = 1;
@@ -46,7 +57,7 @@ public abstract class CloudUtils {
         String parsedLine;
         // validate the file header
         parsedLine = br.readLine();
-        if (!parsedLine.equals("API_Name,Memory,vCPUs,Family,Price,gFlops,ramSpeed,diskSpeed,networkSpeed"))
+        if (!parsedLine.equals("API_Name,Memory,vCPUs,gFlops,ramSpeed,diskSpeed,networkSpeed,Price"))
             throw new IOException("Invalid CSV header inside: " + instanceTablePath);
 
 

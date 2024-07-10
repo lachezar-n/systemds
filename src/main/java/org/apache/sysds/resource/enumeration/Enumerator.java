@@ -1,5 +1,6 @@
 package org.apache.sysds.resource.enumeration;
 
+import org.apache.hadoop.yarn.webapp.hamlet2.Hamlet;
 import org.apache.spark.SparkConf;
 import org.apache.sysds.api.DMLScript;
 import org.apache.sysds.common.Types;
@@ -14,24 +15,13 @@ import org.apache.sysds.runtime.controlprogram.parfor.stat.InfrastructureAnalyze
 import org.jetbrains.annotations.NotNull;
 import scala.Tuple2;
 
+import java.io.IOException;
 import java.util.*;
 
 
 public abstract class Enumerator {
-    /**
-     * A reasonable upper bound for the possible number of executors
-     * is required to set limits for the search space and to avoid
-     * evaluating cluster configurations that most probably would
-     * have too high distribution overhead
-     */
-    protected static final int UPPER_BOUND_NUM_EXECUTORS = 200;
-    /**
-     * {@code CloudInstance} object to be used only for initial recompilation.
-     * It should not be used for cost estimation.
-     */
-    static final CloudInstance minimalInstance = new CloudInstance("dummy", 512*1024*1024, 1, -1, -1, -1, -1, Double.MAX_VALUE);
     public enum EnumerationStrategy {
-        RangeBased, // considering all combination within a given range of configuration
+        GridBased, // considering all combination within a given range of configuration
         MemoryBased, // considering only combinations of configurations with memory budge close to memory estimates
     }
 
@@ -41,6 +31,12 @@ public abstract class Enumerator {
     }
 
     public static final int DEFAULT_MIN_EXECUTORS = 0; // Single Node execution allowed
+    /**
+     * A reasonable upper bound for the possible number of executors
+     * is required to set limits for the search space and to avoid
+     * evaluating cluster configurations that most probably would
+     * have too high distribution overhead
+     */
     public static final int DEFAULT_MAX_EXECUTORS = 200;
     Object costEstimator; // placeholder for the cost estimator
     Object compiler; // placeholder for potential re-compiler class
@@ -53,17 +49,31 @@ public abstract class Enumerator {
     private final double maxPrice;
     protected final int minExecutors;
     protected final int maxExecutors;
+    protected final Set<InstanceType> instanceTypesRange;
+    protected final Set<InstanceSize> instanceSizeRange;
+
 
     public Enumerator(Builder builder) {
         if (builder.provider.equals(CloudUtils.CloudProvider.AWS)) {
             utils = new AWSUtils();
         } // as of now no other provider is supported
+        this.program = builder.program;
         this.enumStrategy = builder.enumStrategy;
         this.optStrategy = builder.optStrategy;
         this.maxTime = builder.maxTime;
         this.maxPrice = builder.maxPrice;
         this.minExecutors = builder.minExecutors;
         this.maxExecutors = builder.maxExecutors;
+        this.instanceTypesRange = builder.instanceTypesRange;
+        this.instanceSizeRange = builder.instanceSizeRange;
+    }
+
+    public void loadInstanceTableFile(String path) throws IOException {
+        instances = utils.loadInstanceInfoTable(path);
+    }
+
+    public void setInstanceTable(HashMap<String, CloudInstance> input) {
+        instances = input;
     }
 
     /**
@@ -75,21 +85,22 @@ public abstract class Enumerator {
      *
      * @return
      */
-    protected abstract SolutionPoint enumerate();
+    public abstract SolutionPoint enumerate();
 
     protected double[] getCostEstimate(ConfigurationPoint point) {
         // get the estimated time cost
         double timeCost;
         try {
+            // estimate execution time based on the state of the current local and spark configurations;
+            // TODO: pass further relevant cluster configurations to cost estimator after extending it
+            //  like for example: FLOPS, I/O and networking speed
             timeCost = CostEstimator.estimateExecutionTime(program);
         } catch (CostEstimationException e) {
             timeCost = Double.MAX_VALUE;
         }
         // calculate monetary cost
-
-        // and then execute the cost estimator
-        // estimate also the monastery cost
-        return new double[] {0, 0}; // time cost, monetary cost
+        double monetaryCost = utils.calculateClusterPrice(point, timeCost);
+        return new double[] {timeCost, monetaryCost}; // time cost, monetary cost
     }
 
     protected void updateOptimalSolution(SolutionPoint currentOptimal, ConfigurationPoint newPoint, double newTimeCost, double newMonetaryCost) {
@@ -137,144 +148,6 @@ public abstract class Enumerator {
         }
     }
 
-    static class ConfigurationPoint {
-        CloudInstance driverInstance;
-        CloudInstance executorInstance;
-        int numberExecutors;
-
-        public ConfigurationPoint(CloudInstance driverInstance, CloudInstance executorInstance, int numberExecutors) {
-            this.driverInstance = driverInstance;
-            this.executorInstance = executorInstance;
-            this.numberExecutors = numberExecutors;
-        }
-    }
-
-    static class SolutionPoint extends ConfigurationPoint {
-        double timeCost;
-        double monetaryCost;
-
-        public SolutionPoint(ConfigurationPoint inputPoint, double timeCost, double monetaryCost) {
-            super(inputPoint.driverInstance, inputPoint.executorInstance, inputPoint.numberExecutors);
-            this.timeCost = timeCost;
-            this.monetaryCost = monetaryCost;
-        }
-
-        public void update(ConfigurationPoint point, double timeCost, double monetaryCost) {
-            this.driverInstance = point.driverInstance;
-            this.executorInstance = point.executorInstance;
-            this.numberExecutors = point.numberExecutors;
-            this.timeCost = timeCost;
-            this.monetaryCost = monetaryCost;
-        }
-    }
-
-    public static class Builder {
-        private CloudUtils.CloudProvider provider = CloudUtils.CloudProvider.AWS; // currently default and only choice
-        private EnumerationStrategy enumStrategy = null;
-        private OptimizationStrategy optStrategy = null;
-        private double maxTime = -1d;
-        private double maxPrice = -1d;
-        private int minExecutors = DEFAULT_MIN_EXECUTORS;
-        private int maxExecutors = DEFAULT_MAX_EXECUTORS;
-        private Object[] args;
-
-        public Builder() {}
-
-        public Builder withCloudProvider(CloudUtils.CloudProvider provider) {
-            this.provider = provider;
-            return this;
-        }
-
-        public Builder withEnumerationStrategy(EnumerationStrategy strategy) {
-            if (strategy == EnumerationStrategy.RangeBased) {
-                args = new Set[4];
-            }
-            this.enumStrategy = strategy;
-            return this;
-        }
-
-        public Builder withOptimizationStrategy(OptimizationStrategy strategy) {
-            this.optStrategy = strategy;
-            return this;
-        }
-
-        public Builder withTimeLimit(double time) {
-            this.maxTime = time;
-            return this;
-        }
-
-        public Builder withBudget(double price) {
-            this.maxPrice = price;
-            return this;
-        }
-
-        public Builder withExecutorNumberRange(int min, int max) {
-            if (enumStrategy != EnumerationStrategy.RangeBased) {
-                throw new IllegalArgumentException("Setting ranges is allowed only after " +
-                        "specifying enumeration strategy ot type RangeBased");
-            }
-            this.minExecutors = min;
-            this.maxExecutors = max;
-            return this;
-        }
-
-        // RangeBased specific -----------------------------------------------------------------------------------------
-        public Builder withInstanceTypeRange(String[] instanceTypes) {
-            if (enumStrategy != EnumerationStrategy.RangeBased) {
-                throw new IllegalArgumentException("Setting ranges is allowed only after " +
-                        "specifying enumeration strategy ot type RangeBased");
-            }
-            Set<InstanceType> types = EnumeratorRangeBased.typeRangeFromStrings(instanceTypes);
-            args[0] = types;
-            return this;
-        }
-
-        public Builder withInstanceSizeRange(String[] instanceSizes) {
-            if (enumStrategy != EnumerationStrategy.RangeBased) {
-                throw new IllegalArgumentException("Setting ranges is allowed only after " +
-                        "specifying enumeration strategy ot type RangeBased");
-            }
-            Set<InstanceSize> sizes = EnumeratorRangeBased.sizeRangeFromStrings(instanceSizes);
-            args[1] = sizes;
-            return this;
-        }
-
-        public Enumerator build() {
-            if (this.provider != CloudUtils.CloudProvider.AWS) { // currently obsolete but avoids uncertain builder state
-                throw new UnsupportedOperationException("Only AWS is supported as of now.");
-            }
-
-            switch (optStrategy) {
-                case MinTime:
-                    if (this.maxPrice < 0) {
-                        throw new IllegalArgumentException("Budget not specified but required " +
-                                "for the chosen optimization strategy: " + optStrategy.toString());
-                    }
-                    break;
-                case MinPrice:
-                    if (this.maxTime < 0) {
-                        throw new IllegalArgumentException("Time limit not specified but required " +
-                                "for the chosen optimization strategy: " + optStrategy.toString());
-                    }
-                    break;
-                default: // in case optimization strategy was not configured
-                    throw new IllegalArgumentException("Setting an optimization strategy is required.");
-            }
-
-            switch (enumStrategy) {
-                case RangeBased:
-                    InstanceType[] types = (InstanceType[]) Objects.requireNonNullElseGet((InstanceType[]) args[0], InstanceType::values);
-                    InstanceSize[] sizes = (InstanceSize[]) Objects.requireNonNullElseGet((InstanceSize[]) args[1], InstanceSize::values);
-                    int min = (int) Objects.requireNonNullElseGet(args[2], () -> DEFAULT_MIN_EXECUTORS);
-                    int max = (int) Objects.requireNonNullElseGet(args[3], () -> DEFAULT_MAX_EXECUTORS);
-                    return new EnumeratorRangeBased(this, types, sizes, min, max);
-                case MemoryBased:
-                    return new EnumeratorMemoryBased(this);
-                default:
-                    throw new IllegalArgumentException("Setting an enumeration strategy is required.");
-            }
-        }
-    }
 
     /**
      * Data structure representing the search space for VM instances
@@ -348,205 +221,161 @@ public abstract class Enumerator {
         }
     }
 
-    // -----------------------------------------------------------------------------------------------------------------
-    // OLD - TODO: delete after the implementation is stable
+    /**
+     * Simple data structure to hold cluster configurations
+     */
+    public static class ConfigurationPoint {
+        public CloudInstance driverInstance;
+        public CloudInstance executorInstance;
+        public int numberExecutors;
 
-//    /**
-//     *
-//     * @_1 - node memory in MB
-//     * @_2 - number of executor nodes
-//     */
-//    static class DistributedMemory extends Tuple2<Long, Integer> implements Comparable<DistributedMemory>{
-//
-//        public DistributedMemory(Long _1, Integer _2) {
-//            super(_1, _2);
-//        }
-//
-//        @Override
-//        public int compareTo(@NotNull Enumerator.DistributedMemory o) {
-//            long o1TotalMemory = this._1 * this._2;
-//            long o2TotalMemory = o._1 * o._2;
-//            int totalMemoryComparison = Long.compare(o1TotalMemory, o2TotalMemory);
-//            if (totalMemoryComparison != 0) {
-//                return totalMemoryComparison;
-//            }
-//            // further comparison based on the number of executors
-//            return Integer.compare(this._2, o._2);
-//        }
-//    }
-//        public static LinkedList<Tuple3<Long, Integer, CloudInstance>> flattenDriverEntry(Map.Entry<Long, LinkedList<InstanceNode>> entry) {
-//            LinkedList<Tuple3<Long, Integer, CloudInstance>> result = new LinkedList<>();
-//            for (InstanceNode node: entry.getValue()) {
-//                Tuple3<Long, Integer, CloudInstance> newTuple = new Tuple3<>(entry.getKey(), node._1, node._2);
-//                result.add(newTuple);
-//            }
-//            return result;
-//        }
-//
-//
-//        public static LinkedList<Tuple4<Long, Integer, Integer, CloudInstance>> flattenExecutorEntry(Map.Entry<DistributedMemory, LinkedList<InstanceNode>> entry) {
-//            LinkedList<Tuple4<Long, Integer, Integer, CloudInstance>> result = new LinkedList<>();
-//            for (InstanceNode node: entry.getValue()) {
-//                Tuple4<Long, Integer, Integer, CloudInstance> newTuple = new Tuple4<>(
-//                        entry.getKey()._1,
-//                        entry.getKey()._2,
-//                        node._1,
-//                        node._2
-//                );
-//                result.add(newTuple);
-//            }
-//            return result;
-//        }
-//    static class DriverSpace {
-//        /**
-//         * <p>key: memory in MB</p>
-//         * <p>value: driver memory node</p>
-//         * Using TreeMap to ensure ascending order based on the memory size.
-//         */
-//        TreeMap<Long, DriverMemoryNode> memoryNodes = new TreeMap<>();
-//
-//        void initialize(HashMap<String, CloudInstance> instances) {
-//            for (CloudInstance instance: instances.values()) {
-//                long currentMemory = instance.getMemory();
-//                DriverMemoryNode currentNode;
-//                if (memoryNodes.containsKey(currentMemory)) {
-//                    currentNode = memoryNodes.get(currentMemory);
-//                } else {
-//                    currentNode = new DriverMemoryNode(currentMemory);
-//                    memoryNodes.put(currentMemory, currentNode);
-//                }
-//                CharacteristicNode.appendInstance(instance, currentNode.characteristicsNodes);
-//            }
-//        }
-//    }
-//
-//    static class ExecutorSpace {
-//        /**
-//         * <p>key: total memory in MB (sum of all executors' memory)</p>
-//         * <p>value: driver memory node</p>
-//         * Using TreeMap to ensure ascending order based on the memory size.
-//         */
-//        TreeMap<Tuple2<Long, Integer>, ExecutorMemoryNode> memoryNodes = new TreeMap<>((o1, o2) -> {
-//            long o1TotalMemory = o1._1 * o1._2;
-//            long o2TotalMemory = o2._1 * o2._2;
-//            int totalMemoryComparison = Long.compare(o1TotalMemory, o2TotalMemory);
-//            if (totalMemoryComparison != 0) {
-//                return totalMemoryComparison;
-//            }
-//            // further comparison based on the number of executors
-//            return Integer.compare(o1._2, o2._2);
-//        });
-//
-//        void initialize(HashMap<String, CloudInstance> instances, int minNumber, int maxNumber) {
-//            if (minNumber < 0 || maxNumber <= minNumber || maxNumber > UPPER_BOUND_NUM_EXECUTORS) {
-//                throw new IllegalArgumentException("Given range for number of execurtors is not valid. " +
-//                        "It should fit in [0, " + UPPER_BOUND_NUM_EXECUTORS + "]");
-//            }
-//            if (minNumber == 0) {
-//                Tuple2<Long, Integer> zeroKey = new Tuple2<>(-1L, 0);
-//                memoryNodes.put(zeroKey, null); // TODO: consider if there is a better approach for 0 executors (single node execution)
-//            }
-//            for (int n = 1; n <= maxNumber; n++) {
-//                for (CloudInstance instance: instances.values()) {
-//                    long currentMemory = instance.getMemory();
-//                    Tuple2<Long, Integer> currentKey = new Tuple2<>(currentMemory, n);
-//                    ExecutorMemoryNode currentNode;
-//                    if (memoryNodes.containsKey(currentKey)) {
-//                        currentNode = memoryNodes.get(currentKey);
-//                    } else {
-//                        // here put the instance memory and not the total one
-//                        currentNode = new ExecutorMemoryNode(instance.getMemory(), n);
-//                        memoryNodes.put(currentKey, currentNode);
-//                    }
-//                    CharacteristicNode.appendInstance(instance, currentNode.characteristicsNodes);
-//                }
-//            }
-//        }
-//
-//
-//    }
-//    static class DriverMemoryNode {
-//        long nodeMemory; // in MB
-//        LinkedList<CharacteristicNode> characteristicsNodes;
-//
-//        public DriverMemoryNode(long memory) {
-//            this.nodeMemory = memory;
-//            characteristicsNodes = new LinkedList<>();
-//        }
-//
-//        LinkedList<Tuple3<Long, Integer, CloudInstance>> flatten(DriverMemoryNode mNode) {
-//            LinkedList<Tuple3<Long, Integer, CloudInstance>> result = new LinkedList<>();
-//            for (CharacteristicNode cNode: mNode.characteristicsNodes) {
-//                Tuple3<Long, Integer, CloudInstance> newTuple = new Tuple3<>(mNode.nodeMemory, cNode.cores, cNode.instance);
-//                result.add(newTuple);
-//            }
-//            return result;
-//        }
-//    }
-//
-//    static class ExecutorMemoryNode {
-//        long nodeMemory; // in MB
-//        int numberExecutors;
-//        LinkedList<CharacteristicNode> characteristicsNodes;
-//
-//        public ExecutorMemoryNode(long memory, int number) {
-//            this.nodeMemory = memory;
-//            this.numberExecutors = number;
-//            characteristicsNodes = new LinkedList<>();
-//        }
-//
-//        LinkedList<Tuple4<Long, Integer, Integer, CloudInstance>> flatten(ExecutorMemoryNode mNode) {
-//            LinkedList<Tuple4<Long, Integer, Integer, CloudInstance>> result = new LinkedList<>();
-//            for (CharacteristicNode cNode: mNode.characteristicsNodes) {
-//                Tuple4<Long, Integer, Integer, CloudInstance> newTuple = new Tuple4<>(mNode.nodeMemory, mNode.numberExecutors, cNode.cores, cNode.instance);
-//                result.add(newTuple);
-//            }
-//            return result;
-//        }
-//    }
-//
-//    public static class OldDriverNode {
-//        CloudInstance instance;
-//        Map<InstanceType, Map<InstanceSize, ExecutorNode>> executors;
-//    }
-//
-//    public static class ExecutorNode {
-//        CloudInstance instance;
-//        int[] numberExecutors;
-//    }
-//
-//    /**
-//     * This class represents the search space for the enumeration.
-//     * An object of this class is to be returned by the {@code enumerate()}
-//     * method of the {@code Enumerator} class.
-//     */
-//    public static class ConfigurationSpace extends HashMap<InstanceType, HashMap<InstanceSize, OldDriverNode>> {
-//        public static ArrayList<ConfigurationPoint> flattenSpace(ConfigurationSpace space) {
-//            ArrayList<ConfigurationPoint> result = new ArrayList<>();
-//            // parse all tree roots
-//            for (HashMap<InstanceSize, OldDriverNode> root:
-//                    space.values()) {
-//                // parse all driver nodes for each root
-//                for (OldDriverNode driverNode: root.values()) {
-//                    // parse all possible executor instance types for each driver node
-//                    for (Map<InstanceSize, ExecutorNode> executorTypes:
-//                            driverNode.executors.values()) {
-//                        // parse all executor nodes for each executor instance type
-//                        for (ExecutorNode executorNode:
-//                                executorTypes.values()) {
-//                            // parse all possible number of executors for each executor instance
-//                            for (int numberExecutors: executorNode.numberExecutors) {
-//                                ConfigurationPoint point = new ConfigurationPoint();
-//                                point.driverInstance = driverNode.instance;
-//                                point.executorInstance = executorNode.instance;
-//                                point.numberExecutors = numberExecutors;
-//                                result.add(point);
-//                            }
-//                        }
-//                    }
-//                }
-//            }
-//            return result;
-//        }
-//    }
+        public ConfigurationPoint(CloudInstance driverInstance, CloudInstance executorInstance, int numberExecutors) {
+            this.driverInstance = driverInstance;
+            this.executorInstance = executorInstance;
+            this.numberExecutors = numberExecutors;
+        }
+    }
+
+    /**
+     * Data structure to hold all data related to cost estimation
+     */
+    public static class SolutionPoint extends ConfigurationPoint {
+        double timeCost;
+        double monetaryCost;
+
+        public SolutionPoint(ConfigurationPoint inputPoint, double timeCost, double monetaryCost) {
+            super(inputPoint.driverInstance, inputPoint.executorInstance, inputPoint.numberExecutors);
+            this.timeCost = timeCost;
+            this.monetaryCost = monetaryCost;
+        }
+
+        public void update(ConfigurationPoint point, double timeCost, double monetaryCost) {
+            this.driverInstance = point.driverInstance;
+            this.executorInstance = point.executorInstance;
+            this.numberExecutors = point.numberExecutors;
+            this.timeCost = timeCost;
+            this.monetaryCost = monetaryCost;
+        }
+    }
+
+    public static class Builder {
+        private CloudUtils.CloudProvider provider = CloudUtils.CloudProvider.AWS; // currently default and only choice
+        private Program program;
+        private EnumerationStrategy enumStrategy = null;
+        private OptimizationStrategy optStrategy = null;
+        private double maxTime = -1d;
+        private double maxPrice = -1d;
+        private int minExecutors = DEFAULT_MIN_EXECUTORS;
+        private int maxExecutors = DEFAULT_MAX_EXECUTORS;
+        private Set<InstanceType> instanceTypesRange;
+        private Set<InstanceSize> instanceSizeRange;
+        private int stepSize = 1; // optional for grid-based enumeration
+
+        public Builder() {}
+
+        public Builder withCloudProvider(CloudUtils.CloudProvider provider) {
+            this.provider = provider;
+            return this;
+        }
+
+        public Builder withRuntimeProgram(Program program) {
+            this.program = program;
+            return this;
+        }
+
+        public Builder withEnumerationStrategy(EnumerationStrategy strategy) {
+            this.enumStrategy = strategy;
+            return this;
+        }
+
+        public Builder withOptimizationStrategy(OptimizationStrategy strategy) {
+            this.optStrategy = strategy;
+            return this;
+        }
+
+        public Builder withTimeLimit(double time) {
+            this.maxTime = time;
+            return this;
+        }
+
+        public Builder withBudget(double price) {
+            this.maxPrice = price;
+            return this;
+        }
+
+        public Builder withExecutorNumberRange(int min, int max) {
+            this.minExecutors = min;
+            this.maxExecutors = max;
+            return this;
+        }
+
+        public Builder withInstanceTypeRange(String[] instanceTypes) {
+            this.instanceTypesRange = typeRangeFromStrings(instanceTypes);
+            return this;
+        }
+
+        public Builder withInstanceSizeRange(String[] instanceSizes) {
+            this.instanceSizeRange = sizeRangeFromStrings(instanceSizes);
+            return this;
+        }
+
+        public Builder withStepSize(int stepSize) {
+            this.stepSize = stepSize;
+            return this;
+        }
+
+        public Enumerator build() {
+            if (this.provider != CloudUtils.CloudProvider.AWS) { // currently obsolete but avoids uncertain builder state
+                throw new UnsupportedOperationException("Only AWS is supported as of now.");
+            }
+
+            if (this.program == null) {
+                throw new IllegalArgumentException("Providing runtime program is required");
+            }
+
+            switch (optStrategy) {
+                case MinTime:
+                    if (this.maxPrice < 0) {
+                        throw new IllegalArgumentException("Budget not specified but required " +
+                                "for the chosen optimization strategy: " + optStrategy.toString());
+                    }
+                    break;
+                case MinPrice:
+                    if (this.maxTime < 0) {
+                        throw new IllegalArgumentException("Time limit not specified but required " +
+                                "for the chosen optimization strategy: " + optStrategy.toString());
+                    }
+                    break;
+                default: // in case optimization strategy was not configured
+                    throw new IllegalArgumentException("Setting an optimization strategy is required.");
+            }
+
+            switch (enumStrategy) {
+                case GridBased:
+                    return new EnumeratorGridBased(this, stepSize);
+                case MemoryBased:
+                    return new EnumeratorMemoryBased(this);
+                default:
+                    throw new IllegalArgumentException("Setting an enumeration strategy is required.");
+            }
+        }
+
+        protected static Set<InstanceType> typeRangeFromStrings(String[] types) {
+            Set<InstanceType> result = EnumSet.noneOf(InstanceType.class);
+            for (String typeAsString: types) {
+                InstanceType type = InstanceType.valueOf(typeAsString); // can throw IllegalArgumentException
+                result.add(type);
+            }
+            return result;
+        }
+
+        protected static Set<InstanceSize> sizeRangeFromStrings(String[] sizes) {
+            Set<InstanceSize> result = EnumSet.noneOf(InstanceSize.class);
+            for (String sizeAsString: sizes) {
+                InstanceSize size = InstanceSize.valueOf(sizeAsString); // can throw IllegalArgumentException
+                result.add(size);
+            }
+            return result;
+        }
+    }
 }

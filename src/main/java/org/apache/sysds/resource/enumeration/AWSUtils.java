@@ -21,18 +21,6 @@ public class AWSUtils extends CloudUtils {
     }
 
     @Override
-    public InstanceType getTypeEnum(String instanceName) {
-        String typeAsStrung = getInstanceType(instanceName);
-        return InstanceType.valueOf(typeAsStrung.toUpperCase());
-    }
-
-    @Override
-    public InstanceSize getSizeEnum(String instanceName) {
-        String sizeAsString = getInstanceSize(instanceName);
-        return InstanceSize.valueOf("_" + sizeAsString.toUpperCase());
-    }
-
-    @Override
     public double calculateClusterPrice(Enumerator.ConfigurationPoint config, double time) {
         double pricePerSeconds = getClusterCostPerHour(config);
         return (DEFAULT_CLUSTER_LAUNCH_TIME + time) * pricePerSeconds;

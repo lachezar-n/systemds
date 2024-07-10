@@ -7,37 +7,53 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import org.apache.sysds.resource.enumeration.CloudInstance;
+import org.apache.sysds.resource.enumeration.CloudUtils;
 import org.apache.sysds.resource.enumeration.Enumerator;
+import org.apache.sysds.resource.enumeration.EnumeratorGridBased;
+import org.apache.sysds.runtime.controlprogram.Program;
 import org.junit.Assert;
 import org.junit.Test;
 
-
-import static org.apache.sysds.test.resource.TestingUtils.getSimpleCloudInstanceMap;
-
-@SuppressWarnings("unchecked")
 public class EnumeratorTests {
 
     @Test
-    public void driverSpaceGenerationTest() throws NoSuchFieldException, IllegalAccessException {
-        HashMap<String, CloudInstance> instances = getSimpleCloudInstanceMap();
-        Enumerator.SearchSpace searchSpace = new Enumerator.SearchSpace();
-        searchSpace.initSpace(instances);
+    public void GridBasedEnumerationTest() throws NoSuchFieldException, IllegalAccessException {
+        Program emptyProgram = new Program();
 
-        Field driverSpaceField = Enumerator.SearchSpace.class.getDeclaredField("driverSpace");
-        driverSpaceField.setAccessible(true);
-        TreeMap<Long, LinkedList<Enumerator.InstanceNode>> driverSpace = (TreeMap<Long, LinkedList<Enumerator.InstanceNode>>) driverSpaceField.get(searchSpace);
-        long lastMemoryEntry = 0;
-        for (Map.Entry<Long, LinkedList< Enumerator.InstanceNode>> entry: driverSpace.entrySet()) {
-            Assert.assertTrue(lastMemoryEntry <= entry.getKey());
-            lastMemoryEntry = entry.getKey();
-            Enumerator.InstanceNode lastInstanceNodeEntry = null;
-            for (Enumerator.InstanceNode node: entry.getValue()) {
-                if (lastInstanceNodeEntry != null) {
-                    Assert.assertTrue(lastInstanceNodeEntry.compareTo(node) < 0);
-                }
-                lastInstanceNodeEntry = node;
-            }
-        }
+        Enumerator gridBasedEnumerator = (new Enumerator.Builder())
+                .withRuntimeProgram(emptyProgram)
+                .withEnumerationStrategy(Enumerator.EnumerationStrategy.GridBased)
+                .withOptimizationStrategy(Enumerator.OptimizationStrategy.MinPrice)
+                .withTimeLimit(Double.MAX_VALUE)
+                .withCloudProvider(CloudUtils.CloudProvider.AWS)
+                .withExecutorNumberRange(0, 2)
+                .build();
+
+        gridBasedEnumerator.setInstanceTable(TestingUtils.getSimpleCloudInstanceMap());
+        Enumerator.SolutionPoint solution = gridBasedEnumerator.enumerate();
+
+        Assert.assertEquals("m5.xlarge", solution.driverInstance.getInstanceName());
+        Assert.assertEquals(0, solution.numberExecutors);
+    }
+
+    @Test
+    public void MemoryBasedEnumerationTest() throws NoSuchFieldException, IllegalAccessException {
+        Program emptyProgram = new Program();
+
+        Enumerator gridBasedEnumerator = (new Enumerator.Builder())
+                .withRuntimeProgram(emptyProgram)
+                .withEnumerationStrategy(Enumerator.EnumerationStrategy.MemoryBased)
+                .withOptimizationStrategy(Enumerator.OptimizationStrategy.MinPrice)
+                .withTimeLimit(Double.MAX_VALUE)
+                .withCloudProvider(CloudUtils.CloudProvider.AWS)
+                .withExecutorNumberRange(0, 2)
+                .build();
+
+        gridBasedEnumerator.setInstanceTable(TestingUtils.getSimpleCloudInstanceMap());
+        Enumerator.SolutionPoint solution = gridBasedEnumerator.enumerate();
+        // expect the initial values for the optimal solution since 0 estimates
+        Assert.assertNull(solution.driverInstance);
+        Assert.assertEquals(-1, solution.numberExecutors);
     }
 
 }

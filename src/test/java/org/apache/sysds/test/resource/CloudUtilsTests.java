@@ -20,7 +20,7 @@ public class CloudUtilsTests {
         File tmpFile = File.createTempFile("systemds_tmp", ".csv");
 
         List<String> csvLines = Arrays.asList(
-                "API_Name,Memory,vCPUs,Family,Price,gFlops,ramSpeed,diskSpeed,networkSpeed",
+                "API_Name,Memory,vCPUs,gFlops,ramSpeed,diskSpeed,networkSpeed,Price",
                 "m5.xlarge,16.0,4,0.5,0,143.75,160,1.5",
                 "m5.2xlarge,32.0,8,1.0,0,0,0,1.9",
                 "c5.xlarge,8.0,4,0.5,0,0,0,1.7",

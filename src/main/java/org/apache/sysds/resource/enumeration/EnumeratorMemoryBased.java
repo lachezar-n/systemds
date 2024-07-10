@@ -18,7 +18,7 @@ public class EnumeratorMemoryBased extends Enumerator {
     }
 
     @Override
-    protected SolutionPoint enumerate() {
+    public SolutionPoint enumerate() {
         SearchSpace searchSpace = new SearchSpace();
         searchSpace.initSpace(instances);
         SolutionPoint optSolutionPoint = new SolutionPoint(
@@ -98,7 +98,7 @@ public class EnumeratorMemoryBased extends Enumerator {
                     .collect(Collectors.toList());
         }
         // get point for enumeration bigger than the biggest memory estimate
-        long biggestEstimate = listEstimates.get(listEstimates.size()  - 1);
+        long biggestEstimate = listEstimates.isEmpty()? 0 : listEstimates.get(listEstimates.size()  - 1);
         List<Long> biggerPoints = relevantPoints.stream()
                 .filter(mem -> mem >= biggestEstimate && mem < (biggestEstimate + MEMORY_DELTA))
                 .collect(Collectors.toList());
