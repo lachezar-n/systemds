@@ -67,7 +67,7 @@ public abstract class CloudUtils {
                 throw new IOException(String.format("Invalid CSV line(%d) inside: %s", lineCount, instanceTablePath));
 
             String API_Name = values[0];
-            long Memory = (long)Double.parseDouble(values[1])*1024;
+            long Memory = (long) (Double.parseDouble(values[1])*1024)*1024*1024;
             int vCPUs = Integer.parseInt(values[2]);
             double gFlops = Double.parseDouble(values[3]);
             double ramSpeed = Double.parseDouble(values[4]);

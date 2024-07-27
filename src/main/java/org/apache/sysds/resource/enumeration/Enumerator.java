@@ -142,7 +142,7 @@ public abstract class Enumerator {
             sparkConf.set("spark.executor.instances", Integer.toString(numExecutors));
             sparkConf.set("spark.executor.cores", Integer.toString(nodeNumCores));
             // ------------------ Dynamic Configurations -------------------
-            SparkExecutionContext.initVirtualSparkContext(sparkConf);
+            SparkExecutionContext.initLocalSparkContext(sparkConf);
         } else {
             DMLScript.setGlobalExecMode(Types.ExecMode.SINGLE_NODE);
         }

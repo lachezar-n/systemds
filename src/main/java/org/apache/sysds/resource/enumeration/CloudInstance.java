@@ -14,9 +14,9 @@ public class CloudInstance {
     private final double memorySpeed;
     private final double diskSpeed;
     private final double networkSpeed;
-    public CloudInstance(String instanceName, long memoryMB, int vCPUCores, double gFlops, double memorySpeed, double diskSpeed, double networkSpeed, double pricePerHour) {
+    public CloudInstance(String instanceName, long memory, int vCPUCores, double gFlops, double memorySpeed, double diskSpeed, double networkSpeed, double pricePerHour) {
         this.instanceName = instanceName;
-        this.memory = memoryMB * 1024 * 1024;
+        this.memory = memory;
         this.vCPUCores = vCPUCores;
         this.gFlops = gFlops;
         this.memorySpeed = memorySpeed;
