@@ -1,15 +1,7 @@
 package org.apache.sysds.test.resource;
 
-import java.lang.reflect.Field;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.Map;
-import java.util.TreeMap;
-
-import org.apache.sysds.resource.enumeration.CloudInstance;
-import org.apache.sysds.resource.enumeration.CloudUtils;
-import org.apache.sysds.resource.enumeration.Enumerator;
-import org.apache.sysds.resource.enumeration.EnumeratorGridBased;
+import org.apache.sysds.resource.enumeration.AnEnumerator;
+import org.apache.sysds.resource.enumeration.EnumerationUtils;
 import org.apache.sysds.runtime.controlprogram.Program;
 import org.junit.Assert;
 import org.junit.Test;
@@ -17,43 +9,47 @@ import org.junit.Test;
 public class EnumeratorTests {
 
     @Test
-    public void GridBasedEnumerationTest() throws NoSuchFieldException, IllegalAccessException {
+    public void GridBasedEnumerationTest() {
         Program emptyProgram = new Program();
 
-        Enumerator gridBasedEnumerator = (new Enumerator.Builder())
+        AnEnumerator gridBasedEnumerator = (new AnEnumerator.Builder())
                 .withRuntimeProgram(emptyProgram)
-                .withEnumerationStrategy(Enumerator.EnumerationStrategy.GridBased)
-                .withOptimizationStrategy(Enumerator.OptimizationStrategy.MinPrice)
+                .withEnumerationStrategy(AnEnumerator.EnumerationStrategy.GridBased)
+                .withOptimizationStrategy(AnEnumerator.OptimizationStrategy.MinTime)
                 .withTimeLimit(Double.MAX_VALUE)
-                .withCloudProvider(CloudUtils.CloudProvider.AWS)
-                .withExecutorNumberRange(0, 2)
+                .withNumberExecutorsRange(0, 2)
                 .build();
 
         gridBasedEnumerator.setInstanceTable(TestingUtils.getSimpleCloudInstanceMap());
-        Enumerator.SolutionPoint solution = gridBasedEnumerator.enumerate();
+
+        gridBasedEnumerator.processing();
+        gridBasedEnumerator.preprocessing();
+        EnumerationUtils.SolutionPoint solution = gridBasedEnumerator.postprocessing();
 
         Assert.assertEquals("m5.xlarge", solution.driverInstance.getInstanceName());
         Assert.assertEquals(0, solution.numberExecutors);
     }
 
     @Test
-    public void MemoryBasedEnumerationTest() throws NoSuchFieldException, IllegalAccessException {
+    public void InterestBasedEnumerationTest() {
         Program emptyProgram = new Program();
 
-        Enumerator gridBasedEnumerator = (new Enumerator.Builder())
+        AnEnumerator gridBasedEnumerator = (new AnEnumerator.Builder())
                 .withRuntimeProgram(emptyProgram)
-                .withEnumerationStrategy(Enumerator.EnumerationStrategy.MemoryBased)
-                .withOptimizationStrategy(Enumerator.OptimizationStrategy.MinPrice)
+                .withEnumerationStrategy(AnEnumerator.EnumerationStrategy.InterestBased)
+                .withOptimizationStrategy(AnEnumerator.OptimizationStrategy.MinPrice)
                 .withTimeLimit(Double.MAX_VALUE)
-                .withCloudProvider(CloudUtils.CloudProvider.AWS)
-                .withExecutorNumberRange(0, 2)
+                .withNumberExecutorsRange(0, 2)
                 .build();
 
         gridBasedEnumerator.setInstanceTable(TestingUtils.getSimpleCloudInstanceMap());
-        Enumerator.SolutionPoint solution = gridBasedEnumerator.enumerate();
-        // expect the initial values for the optimal solution since 0 estimates
-        Assert.assertNull(solution.driverInstance);
-        Assert.assertEquals(-1, solution.numberExecutors);
+
+        gridBasedEnumerator.processing();
+        gridBasedEnumerator.preprocessing();
+        EnumerationUtils.SolutionPoint solution = gridBasedEnumerator.postprocessing();
+
+        Assert.assertEquals("m5.xlarge", solution.driverInstance.getInstanceName());
+        Assert.assertEquals(0, solution.numberExecutors);
     }
 
 }

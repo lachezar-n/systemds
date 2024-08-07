@@ -1,7 +1,7 @@
 package org.apache.sysds.test.resource;
 
-import org.apache.sysds.resource.enumeration.AWSUtils;
-import org.apache.sysds.resource.enumeration.CloudInstance;
+import org.apache.sysds.resource.AWSUtils;
+import org.apache.sysds.resource.CloudInstance;
 import org.junit.Test;
 
 import java.io.File;

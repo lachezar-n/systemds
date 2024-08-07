@@ -1,52 +1,40 @@
 package org.apache.sysds.test.component.resource;
 
-import org.apache.commons.cli.Option;
-import org.apache.commons.cli.Options;
-import org.apache.commons.cli.ParseException;
-import org.apache.hadoop.yarn.webapp.hamlet2.Hamlet;
-import org.apache.sysds.api.DMLOptions;
 import org.apache.sysds.resource.ResourceCompiler;
-import org.apache.sysds.resource.enumeration.CloudInstance;
-import org.apache.sysds.resource.enumeration.Enumerator.ConfigurationPoint;
 import org.apache.sysds.runtime.controlprogram.BasicProgramBlock;
 import org.apache.sysds.runtime.controlprogram.Program;
-import org.apache.sysds.runtime.controlprogram.ProgramBlock;
 import org.apache.sysds.runtime.controlprogram.context.SparkExecutionContext;
 import org.apache.sysds.runtime.controlprogram.parfor.stat.InfrastructureAnalyzer;
 import org.apache.sysds.runtime.instructions.Instruction;
 import org.apache.sysds.runtime.instructions.spark.SPInstruction;
 import org.apache.sysds.test.AutomatedTestBase;
-import org.apache.sysds.test.component.parfor.ParForDependencyAnalysisTest;
 import org.apache.sysds.utils.Explain;
+
 import org.junit.Assert;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
-import java.awt.image.RescaleOp;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import static org.apache.sysds.runtime.controlprogram.context.SparkExecutionContext.SparkClusterConfig.RESERVED_SYSTEM_MEMORY_BYTES;
 
-public class RecompileTest extends AutomatedTestBase {
+public class RecompilationTest extends AutomatedTestBase {
     private static final boolean DEBUG_MODE = true;
     private static final String TEST_DIR = "component/resource/";
     private static final String TEST_DATA_DIR = "component/resource/data/";
     private static final String HOME = SCRIPT_DIR + TEST_DIR;
     private static final String HOME_DATA = SCRIPT_DIR + TEST_DATA_DIR;
-    private static final String TEST_CLASS_DIR = TEST_DIR + RecompileTest.class.getSimpleName() + "/";
-    // static configuration values
+    // Static Configuration values -------------------------------------------------------------------------------------
     private static final int driverThreads = 4;
     private static final int executorThreads = 2;
 
     @Override
     public void setUp() {}
 
-    // Tests for setting cluster configurations -------------------------------------------------------------------------
+    // Tests for setting cluster configurations ------------------------------------------------------------------------
 
     @Test
     public void testSetDriverConfigurations() {
@@ -159,7 +147,7 @@ public class RecompileTest extends AutomatedTestBase {
         Program expectedProgram;
 
         ResourceCompiler.setDriverConfigurations(8L*1024*1024*1024, driverThreads);
-        ResourceCompiler.setExecutorConfigurations(0, -1, executorThreads);
+        ResourceCompiler.setSingleNodeExecution();
         expectedProgram = ResourceCompiler.compile(HOME+"mm_test.dml", nvargs);
         runTest(precompiledProgram, expectedProgram, 8L*1024*1024*1024, 0, -1, "ba+*", false);
 
@@ -179,7 +167,7 @@ public class RecompileTest extends AutomatedTestBase {
         runTest(precompiledProgram, expectedProgram, 1024*1024*1024, 2, (long) (0.5*1024*1024*1024), "rmm", true);
 
         ResourceCompiler.setDriverConfigurations(8L*1024*1024*1024, driverThreads);
-        ResourceCompiler.setExecutorConfigurations(0, -1, executorThreads);
+        ResourceCompiler.setSingleNodeExecution();
         expectedProgram = ResourceCompiler.compile(HOME+"mm_test.dml", nvargs);
         runTest(precompiledProgram, expectedProgram, 8L*1024*1024*1024, 0, -1, "ba+*", false);
     }
@@ -201,7 +189,12 @@ public class RecompileTest extends AutomatedTestBase {
         Program precompiledProgram = generateInitialProgram(HOME+"mm_test.dml", nvargs);
 
         ResourceCompiler.setDriverConfigurations(driverMemory, driverThreads);
-        ResourceCompiler.setExecutorConfigurations(numberExecutors, executorMemory, executorThreads);
+        if (numberExecutors > 0) {
+            ResourceCompiler.setExecutorConfigurations(numberExecutors, executorMemory, executorThreads);
+        } else {
+            ResourceCompiler.setSingleNodeExecution();
+        }
+
         // original compilation used for comparison
         Program expectedProgram = ResourceCompiler.compile(HOME+"mm_test.dml", nvargs);
         runTest(precompiledProgram, expectedProgram, driverMemory, numberExecutors, executorMemory, expectedOpcode, expectedSparkExecType);
@@ -215,7 +208,11 @@ public class RecompileTest extends AutomatedTestBase {
         Program precompiledProgram = generateInitialProgram(HOME+"mm_transpose_test.dml", nvargs);
 
         ResourceCompiler.setDriverConfigurations(driverMemory, driverThreads);
-        ResourceCompiler.setExecutorConfigurations(numberExecutors, executorMemory, executorThreads);
+        if (numberExecutors > 0) {
+            ResourceCompiler.setExecutorConfigurations(numberExecutors, executorMemory, executorThreads);
+        } else {
+            ResourceCompiler.setSingleNodeExecution();
+        }
         // original compilation used for comparison
         Program expectedProgram = ResourceCompiler.compile(HOME+"mm_transpose_test.dml", nvargs);
         runTest(precompiledProgram, expectedProgram, driverMemory, numberExecutors, executorMemory, expectedOpcode, expectedSparkExecType);
@@ -224,13 +221,7 @@ public class RecompileTest extends AutomatedTestBase {
     private void runTest(Program precompiledProgram, Program expectedProgram, long driverMemory, int numberExecutors, long executorMemory, String expectedOpcode, boolean expectedSparkExecType) {
         String expectedProgramExplained = Explain.explain(expectedProgram);
 
-        CloudInstance driverInstance = new CloudInstance("dummyDriver", driverMemory, driverThreads, -1, -1, -1, -1, -1);
-        CloudInstance executorInstance = null;
-        if (numberExecutors > 0) {
-            executorInstance = new CloudInstance("dummyExecutor", executorMemory, executorThreads, -1, -1, -1, -1, -1);
-        }
-        ConfigurationPoint compilationPoint = new ConfigurationPoint(driverInstance, executorInstance, numberExecutors);
-        Program recompiledProgram = ResourceCompiler.doFullRecompilation(precompiledProgram, compilationPoint);
+        Program recompiledProgram = ResourceCompiler.doFullRecompilation(precompiledProgram, driverMemory, driverThreads, numberExecutors, executorMemory, executorThreads);
         String actualProgramExplained = Explain.explain(recompiledProgram);
 
         if (DEBUG_MODE) System.out.println(actualProgramExplained);

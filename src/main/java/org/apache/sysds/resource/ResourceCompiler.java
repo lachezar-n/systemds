@@ -12,12 +12,10 @@ import org.apache.sysds.lops.Lop;
 import org.apache.sysds.lops.compile.Dag;
 import org.apache.sysds.lops.rewrite.LopRewriter;
 import org.apache.sysds.parser.*;
-import org.apache.sysds.resource.enumeration.Enumerator;
 import org.apache.sysds.runtime.controlprogram.*;
 import org.apache.sysds.runtime.controlprogram.context.SparkExecutionContext;
 import org.apache.sysds.runtime.controlprogram.parfor.stat.InfrastructureAnalyzer;
 import org.apache.sysds.runtime.instructions.Instruction;
-import org.codehaus.janino.Compiler;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -68,8 +66,7 @@ public class ResourceCompiler {
         dmlTranslator.rewriteHopsDAG(dmlProgram);
         dmlTranslator.constructLops(dmlProgram);
         dmlTranslator.rewriteLopDAG(dmlProgram);
-        Program program = dmlTranslator.getRuntimeProgram(dmlProgram, ConfigurationManager.getDMLConfig());
-        return program;
+        return dmlTranslator.getRuntimeProgram(dmlProgram, ConfigurationManager.getDMLConfig());
     }
 
     private static ArrayList<Instruction> recompile(StatementBlock sb, ArrayList<Hop> hops) {
@@ -89,26 +86,25 @@ public class ResourceCompiler {
             l.addToDag(dag);
         }
 
-
         ArrayList<Instruction> newInst = dag
                 .getJobs(sb, ConfigurationManager.getDMLConfig());
 
         return newInst;
     }
 
-    public static Program doFullRecompilation(Program program, Enumerator.ConfigurationPoint clusterConfig) {
+    public static Program doFullRecompilation(Program program, long driverMemory, int driverCores, int numberExecutors, long executorMemory, int executorCores) {
         Dag.resetUniqueMembers();
         Program newProgram = new Program();
-        setDriverConfigurations(clusterConfig.driverInstance.getMemory(), clusterConfig.driverInstance.getVCPUs());
-        setExecutorConfigurations(clusterConfig.numberExecutors,
-                clusterConfig.numberExecutors > 0? clusterConfig.executorInstance.getMemory(): 0,
-                clusterConfig.numberExecutors > 0? clusterConfig.executorInstance.getVCPUs(): 0);
-
+        setDriverConfigurations(driverMemory, driverCores);
+        if (numberExecutors > 0) {
+            setExecutorConfigurations(numberExecutors, executorMemory, executorCores);
+        } else {
+            setSingleNodeExecution();
+        }
         ArrayList<ProgramBlock> B = Stream.concat(
-                program.getProgramBlocks().stream(),
-                program.getFunctionProgramBlocks().values().stream())
+                        program.getProgramBlocks().stream(),
+                        program.getFunctionProgramBlocks().values().stream())
                 .collect(Collectors.toCollection(ArrayList::new));
-        ArrayList<ProgramBlock> newB = new ArrayList<>();
         doRecompilation(B, newProgram);
         return newProgram;
     }
@@ -130,7 +126,7 @@ public class ResourceCompiler {
             WhileProgramBlock wpb = (WhileProgramBlock)originBlock;
             WhileStatementBlock sb = (WhileStatementBlock) originBlock.getStatementBlock();
             if(sb!=null && sb.getPredicateHops()!=null ){
-                ArrayList<Instruction> inst = Recompiler.recompileHopsDag(sb.getPredicateHops(), (LocalVariableMap) null, null, true, true, 0);
+                ArrayList<Instruction> inst = Recompiler.recompileHopsDag(sb.getPredicateHops(), null, null, true, true, 0);
                 wpb.setPredicate(inst);
                 target.addProgramBlock(wpb);
             }
@@ -141,7 +137,7 @@ public class ResourceCompiler {
             IfProgramBlock ipb = (IfProgramBlock)originBlock;
             IfStatementBlock sb = (IfStatementBlock) ipb.getStatementBlock();
             if(sb!=null && sb.getPredicateHops()!=null ){
-                ArrayList<Instruction> inst = Recompiler.recompileHopsDag(sb.getPredicateHops(), (LocalVariableMap) null, null, true, true, 0);
+                ArrayList<Instruction> inst = Recompiler.recompileHopsDag(sb.getPredicateHops(), null, null, true, true, 0);
                 ipb.setPredicate(inst);
                 target.addProgramBlock(ipb);
             }
@@ -154,15 +150,15 @@ public class ResourceCompiler {
             ForStatementBlock sb = (ForStatementBlock) fpb.getStatementBlock();
             if(sb!=null){
                 if( sb.getFromHops()!=null ){
-                    ArrayList<Instruction> inst = Recompiler.recompileHopsDag(sb.getFromHops(), (LocalVariableMap) null, null, true, true, 0);
+                    ArrayList<Instruction> inst = Recompiler.recompileHopsDag(sb.getFromHops(), null, null, true, true, 0);
                     fpb.setFromInstructions( inst );
                 }
                 if(sb.getToHops()!=null){
-                    ArrayList<Instruction> inst = Recompiler.recompileHopsDag(sb.getToHops(), (LocalVariableMap) null, null, true, true, 0);
+                    ArrayList<Instruction> inst = Recompiler.recompileHopsDag(sb.getToHops(), null, null, true, true, 0);
                     fpb.setToInstructions( inst );
                 }
                 if(sb.getIncrementHops()!=null){
-                    ArrayList<Instruction> inst = Recompiler.recompileHopsDag(sb.getIncrementHops(), (LocalVariableMap) null, null, true, true, 0);
+                    ArrayList<Instruction> inst = Recompiler.recompileHopsDag(sb.getIncrementHops(), null, null, true, true, 0);
                     fpb.setIncrementInstructions(inst);
                 }
                 target.addProgramBlock(fpb);
@@ -175,12 +171,9 @@ public class ResourceCompiler {
             BasicProgramBlock bpb = (BasicProgramBlock)originBlock;
             StatementBlock sb = bpb.getStatementBlock();
             ArrayList<Instruction> inst = recompile(sb, sb.getHops());
-            //boolean containsSparkInstruction = OptTreeConverter.containsSparkInstruction(inst, false);
             bpb.setInstructions(inst);
             target.addProgramBlock(bpb);
-
         }
-
     }
 
     public static void setDriverConfigurations(long nodeMemory, int nodeNumCores) {
@@ -207,7 +200,11 @@ public class ResourceCompiler {
             // ------------------ Dynamic Configurations -------------------
             SparkExecutionContext.initLocalSparkContext(sparkConf);
         } else {
-            DMLScript.setGlobalExecMode(Types.ExecMode.SINGLE_NODE);
+            throw new RuntimeException("The given number of executors was 0");
         }
+    }
+
+    public static void setSingleNodeExecution() {
+        DMLScript.setGlobalExecMode(Types.ExecMode.SINGLE_NODE);
     }
 }

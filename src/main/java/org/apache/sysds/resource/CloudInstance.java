@@ -1,4 +1,4 @@
-package org.apache.sysds.resource.enumeration;
+package org.apache.sysds.resource;
 
 /**
  * This class describes the configurations of a single VM instance.
@@ -30,64 +30,49 @@ public class CloudInstance {
     }
 
     /**
-     * Returns the memory of the instance in MB.
-     * @return
+     * @return memory of the instance in B
      */
     public long getMemory() {
         return memory;
     }
 
     /**
-     * Returns the memory per core of the instance in MB.
-     * @return
-     */
-    public long getMemoryPerCore() {
-        return memory /vCPUCores;
-    }
-
-    /**
-     * Returns the number of virtual CPU cores of the instance.
-     * @return
+     * @return number of virtual CPU cores of the instance
      */
     public int getVCPUs() {
         return vCPUCores;
     }
 
     /**
-     * Returns the price per hour of the instance.
-     * @return
+     * @return price per hour of the instance
      */
     public double getPrice() {
         return pricePerHour;
     }
 
     /**
-     * Returns the number of FLOPS of the instance.
-     * @return
+     * @return number of FLOPS of the instance
      */
     public long getFLOPS() {
         return (long) (gFlops*1024)*1024*1024;
     }
 
     /**
-     * Returns the memory speed/bandwidth of the instance in MB/s.
-     * @return
+     * @return memory speed/bandwidth of the instance in MB/s
      */
     public double getMemorySpeed() {
         return memorySpeed;
     }
 
     /**
-     * Returns the disk speed/bandwidth of the instance in MB/s.
-     * @return
+     * @return isk speed/bandwidth of the instance in MB/s
      */
     public double getDiskSpeed() {
         return diskSpeed;
     }
 
     /**
-     * Returns the network speed/bandwidth of the instance in MB/s.
-     * @return
+     * @return network speed/bandwidth of the instance in MB/s
      */
     public double getNetworkSpeed() {
         return networkSpeed;
