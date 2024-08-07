@@ -285,10 +285,7 @@ public class SparseBlockCSR extends SparseBlock
 		return (long) Math.min(size, Long.MAX_VALUE);
 	}
 
-	/**
-	 * Computes the exact size in memory of the materialized block
-	 * @return the exact size in memory
-	 */
+	@Override
 	public long getExactSizeInMemory() {
 		//32B overhead per array, int arr in nrows, int/double arr in nnz
 		double size = 16 + 4 + 4;                                //object + int field + padding
@@ -437,11 +434,11 @@ public class SparseBlockCSR extends SparseBlock
 	@Override
 	public long size(int rl, int ru, int cl, int cu) {
 		long nnz = 0;
-		for(int i=rl; i<ru; i++)
-			if( !isEmpty(i) ) {
+		for(int i = rl; i < ru; i++)
+			if(!isEmpty(i)) {
 				int start = internPosFIndexGTE(i, cl);
-				int end = internPosFIndexGTE(i, cu);
-				nnz += (start!=-1) ? (end-start) : 0;
+				int end = internPosFIndexLTE(i, cu - 1);
+				nnz += (start != -1 && end != -1) ? (end - start + 1) : 0;
 			}
 		return nnz;
 	}
