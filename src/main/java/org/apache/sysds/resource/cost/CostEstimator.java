@@ -89,10 +89,10 @@ public class CostEstimator
 	private double[] spCost; // (compute cost, I/O cost) for Spark instructions
 
 	// declare here the hashmaps
-	protected HashMap<String, VarStats> _stats;
+	private final HashMap<String, VarStats> _stats;
 	// protected HashMap<String, RDDStats> _sparkStats;
 	// protected HashMap<Integer, LinkedList<String>> _transformations;
-	protected HashSet<String> _functions;
+	private final HashSet<String> _functions;
 	private final long localMemory;
 	private long usedMememory;
 
@@ -108,7 +108,7 @@ public class CostEstimator
 		double costs = estimator.getTimeEstimate(program);
 		return costs;
 	}
-	private CostEstimator() {
+	public CostEstimator() {
 		// initialize here the hashmaps
 		_stats = new HashMap<>();
 		//_transformations = new HashMap<>();
@@ -118,6 +118,20 @@ public class CostEstimator
 		usedMememory = 0;
 		cpCost = new double[]{0.0, 0.0};
 		spCost = new double[]{0.0, 0.0};
+	}
+
+	/**
+	 * Meant to be used for testing purposes
+	 */
+	public void putStats(HashMap<String, VarStats> inputStats) {
+		_stats.putAll(inputStats);
+	}
+
+	/**
+	 * Meant to be used for testing purposes
+	 */
+	public VarStats getStats(String statsName) {
+		return _stats.get(statsName);
 	}
 
 	public static void setCP_FLOPS(long gFlops) {
@@ -183,7 +197,7 @@ public class CostEstimator
 		return ret;
 	}
 
-	private double getTimeEstimateInst(ProgramBlock pb, Instruction inst) throws CostEstimationException {
+	public double getTimeEstimateInst(ProgramBlock pb, Instruction inst) throws CostEstimationException {
 		double ret;
 		if (inst instanceof CPInstruction) {
 			maintainCPInstVariableStatistics((CPInstruction)inst);
@@ -218,7 +232,7 @@ public class CostEstimator
 	 * 	adding cost is not relevant.
 	 * @param inst
 	 */
-	private void maintainCPInstVariableStatistics(CPInstruction inst) throws CostEstimationException {
+	private void maintainCPInstVariableStatistics(CPInstruction inst) {
 		if( inst instanceof VariableCPInstruction )
 		{
 			String opcode = inst.getOpcode();
@@ -279,7 +293,7 @@ public class CostEstimator
 	 * @return
 	 * @throws CostEstimationException
 	 */
-	private double getTimeEstimateCPInst(CPInstruction inst) throws CostEstimationException {
+		public double getTimeEstimateCPInst(CPInstruction inst) throws CostEstimationException {
 		double ret = 0;
 		if (inst instanceof VariableCPInstruction) {
 			String opcode = inst.getOpcode();
@@ -339,8 +353,8 @@ public class CostEstimator
 		}
 		else if (inst instanceof BinaryCPInstruction) {
 			BinaryCPInstruction binInst = (BinaryCPInstruction) inst;
-			if (binInst.input1.isFrame() || binInst.input2.isFrame())
-				throw new DMLRuntimeException("Frame is not supported for cost estimation");
+			if (binInst.input1.isTensor() || binInst.input2.isTensor())
+				throw new DMLRuntimeException("Tensor is not supported for cost estimation");
 			VarStats input1 = _stats.get(binInst.input1.getName());
 			VarStats input2 = _stats.get(binInst.input2.getName());
 			VarStats output = _stats.get(binInst.output.getName());
